@@ -56,7 +56,6 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
-
         statusText = findViewById(R.id.statusText)
         peerList = findViewById(R.id.peerList)
         btnDiscover = findViewById(R.id.btnDiscover)
@@ -74,7 +73,6 @@ class MainActivity : AppCompatActivity() {
         findViewById<Button>(R.id.btnHangup).setOnClickListener { meshNode.endCall() }
         btnMute.setOnClickListener { toggleMute() }
         btnShareLog.setOnClickListener { shareLog() }
-
         InAppLogger.write('I', "UI", "MainActivity created")
         requestPerms()
         requestBatteryExemption()
@@ -91,12 +89,27 @@ class MainActivity : AppCompatActivity() {
             statusText.text = "Группа потеряна"
             peerList.removeAllViews()
             currentPeerIp = null
+            renderReconnect()
         } }
         meshNode.onIncomingCall = { ip -> runOnUiThread { showIncomingDialog(ip) } }
         meshNode.onCallConnected = { runOnUiThread { showInCallUi("Соединено"); startDurationTimer() } }
         meshNode.onCallEnded = { reason -> runOnUiThread { hideCallUi(reason) } }
         meshNode.onVoiceReceived = { seq, data -> pipeline?.onNetworkVoicePacket(seq, data) }
         meshNode.start()
+    }
+
+    private fun renderReconnect() {
+        peerList.removeAllViews()
+        if (meshNode.hasLastDevice()) {
+            peerList.addView(Button(this).apply {
+                text = "🔄 Переподключиться"
+                setOnClickListener {
+                    InAppLogger.write('I', "UI", "reconnect")
+                    statusText.text = "Переподключение…"
+                    meshNode.tryReconnect()
+                }
+            })
+        }
     }
 
     private fun wireUi() {
@@ -133,7 +146,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun renderPeers(peers: List<MeshNode.WifiP2pDeviceInfo>) {
         peerList.removeAllViews()
-        if (peers.isEmpty()) { statusText.text = "Никого не найдено"; return }
+        if (peers.isEmpty()) { statusText.text = "Никого не найдено"; renderReconnect(); return }
         statusText.text = "Найдено: ${peers.size}"
         peers.forEach { peer ->
             val row = LinearLayout(this).apply {
@@ -147,19 +160,18 @@ class MainActivity : AppCompatActivity() {
             row.addView(Button(this).apply {
                 text = "Подключить"
                 setOnClickListener { btn ->
-                    isEnabled = false
-                    text = "Подключение…"
+                    isEnabled = false; text = "Подключение…"
                     statusText.text = "Подключение к ${peer.address}…"
-                    InAppLogger.write('I', "UI", "connect to ${peer.address}")
+                    InAppLogger.write('I', "UI", "connect ${peer.address}")
                     meshNode.connectTo(peer.raw)
                     (btn as Button).postDelayed({
                         if (!isEnabled) {
                             isEnabled = true; text = "Подключить"
                             if (currentPeerIp == null) {
-                                statusText.text = "Таймаут. Нажмите «Сброс» и повторите (или передёрните Wi-Fi на обоих)."
+                                statusText.text = "Таймаут. «Сброс» и повторите (или передёрните Wi-Fi)."
                             }
                         }
-                    }, 25_000)
+                    }, 35_000)
                 }
             })
             peerList.addView(row)
@@ -235,13 +247,11 @@ class MainActivity : AppCompatActivity() {
         exitCallAudioMode()
         callView.visibility = View.GONE
         discoveryView.visibility = View.VISIBLE
-
         val p = pipeline; pipeline = null
         MeshForegroundService.stop(this)
         if (p != null) lifecycleScope.launch { p.stop() }
         InAppLogger.write('I', "UI", "call ended: $reason")
 
-        // Не теряем группу — если она всё ещё активна, предлагаем "Call again"
         if (meshNode.isInGroup()) {
             val peer = meshNode.currentPeerIp() ?: meshNode.lastKnownPeerIp()
             statusText.text = "Группа активна ($reason). Пир=$peer"
@@ -253,7 +263,8 @@ class MainActivity : AppCompatActivity() {
                 })
             }
         } else {
-            statusText.text = "Звонок завершён ($reason). Группа потеряна — ищите заново."
+            statusText.text = "Звонок завершён ($reason). Группа потеряна."
+            renderReconnect()
         }
     }
 
@@ -278,14 +289,12 @@ class MainActivity : AppCompatActivity() {
 
     private fun stopDurationTimer() {
         durationJob?.cancel(); durationJob = null
-        callDuration.text = "00:00"
-        callStats.text = ""
+        callDuration.text = "00:00"; callStats.text = ""
     }
 
     private fun enterCallAudioMode() {
         try {
-            val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
-            am.mode = AudioManager.MODE_IN_COMMUNICATION
+            (getSystemService(Context.AUDIO_SERVICE) as AudioManager).mode = AudioManager.MODE_IN_COMMUNICATION
         } catch (e: Exception) { InAppLogger.write('W', "Audio", "mode: ${e.message}") }
     }
 
@@ -329,7 +338,7 @@ class MainActivity : AppCompatActivity() {
         prefs.edit().putBoolean("miui_hint_shown", true).apply()
         AlertDialog.Builder(this)
             .setTitle("Настройка MIUI")
-            .setMessage("Включите Автозапуск для Zvon в настройках MIUI, иначе звонок может умереть на погасшем экране.")
+            .setMessage("Включите Автозапуск для Zvon, иначе звонок может умереть на погасшем экране.")
             .setPositiveButton("Открыть") { _, _ -> openMiuiAutostart() }
             .setNegativeButton("Позже", null)
             .show()

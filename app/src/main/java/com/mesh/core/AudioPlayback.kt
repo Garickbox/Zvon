@@ -20,6 +20,7 @@ class AudioPlayback(
         private const val DRIFT_RESYNC_NS = 100_000_000L
         private const val JOIN_TIMEOUT_MS = 3_000L
         private const val DRIFT_WARN_AFTER_FRAMES = 250L
+        private const val TRACK_BUFFER_FRAMES = 4
     }
 
     private val running = AtomicBoolean(false)
@@ -55,7 +56,7 @@ class AudioPlayback(
         if (thread != null) {
             withContext(Dispatchers.IO) { thread.join(JOIN_TIMEOUT_MS) }
             if (thread.isAlive) {
-                logger.e("playback thread did not exit in ${JOIN_TIMEOUT_MS}ms — marking leaked")
+                logger.e("playback thread did not exit in ${JOIN_TIMEOUT_MS}ms — leaked")
                 leakedThread = thread
             }
         }
@@ -90,7 +91,7 @@ class AudioPlayback(
                 if (sleepNs > 0) LockSupport.parkNanos(sleepNs)
                 else if (-sleepNs > DRIFT_RESYNC_NS) {
                     if (framesWritten > DRIFT_WARN_AFTER_FRAMES && driftWarnCount < 3) {
-                        logger.w("drift ${-sleepNs / 1_000_000}ms — resync (frame #$framesWritten)")
+                        logger.w("drift ${-sleepNs / 1_000_000}ms — resync (#$framesWritten)")
                         driftWarnCount++
                     }
                     nextDeadlineNs = now + FRAME_NS; continue
@@ -116,7 +117,7 @@ class AudioPlayback(
             .setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build()
         val t = try {
             AudioTrack.Builder().setAudioAttributes(attrs).setAudioFormat(fmt)
-                .setBufferSizeInBytes(maxOf(minBuf, AudioConfig.FRAME_SAMPLES * 2 * 3))
+                .setBufferSizeInBytes(maxOf(minBuf, AudioConfig.FRAME_SAMPLES * 2 * TRACK_BUFFER_FRAMES))
                 .setTransferMode(AudioTrack.MODE_STREAM).build()
         } catch (e: Exception) { logger.e("AudioTrack.Builder failed", e); return null }
         if (t.state != AudioTrack.STATE_INITIALIZED) { t.release(); return null }

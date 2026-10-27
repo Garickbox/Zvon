@@ -2,11 +2,11 @@ package com.mesh.core
 import java.util.TreeMap
 
 class JitterBuffer(
-    private val targetDelayMs: Long = 60L,
+    private val targetDelayMs: Long = 80L,
     private val frameDurationMs: Long = 20L,
     private val maxCapacity: Int = 50,
-    private val maxConsecutivePlc: Int = 8,
-    private val startTimeoutMs: Long = 500L,
+    private val maxConsecutivePlc: Int = 12,
+    private val startTimeoutMs: Long = 600L,
     private val starvationResetMs: Long = 500L
 ) {
     private val buffer = TreeMap<Long, ByteArray>()
@@ -63,7 +63,6 @@ class JitterBuffer(
     }
 
     @Synchronized fun depth(): Int = buffer.size
-
     @Synchronized fun stats(): String =
         "rx=$packetsReceived late=$packetsLate lost=$packetsLost plc=$plcFramesGenerated reset=$resetsDueToStarvation depth=${buffer.size}"
 }

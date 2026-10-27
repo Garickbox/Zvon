@@ -15,7 +15,6 @@ class MeshNode(
     companion object {
         private const val KEEPALIVE_MS = 2_000L
         private const val DISCONNECT_TIMEOUT_MS = 6_000L
-        private const val HELLO_LOG_EVERY = 10
     }
 
     val myId: UUID = run {
@@ -32,7 +31,7 @@ class MeshNode(
     @Volatile private var callState = CallState.IDLE
     @Volatile private var lastPacketAt = 0L
     @Volatile private var lastKnownPeer: String? = null
-    private var keepaliveSent = 0
+    @Volatile private var lastKnownDevice: WifiP2pDevice? = null
 
     private var keepaliveJob: Job? = null
     private var watchdogJob: Job? = null
@@ -78,18 +77,18 @@ class MeshNode(
     }
 
     fun discover() = wifi.discover()
-    fun connectTo(device: WifiP2pDevice) = wifi.connectSafe(device)
+    fun connectTo(device: WifiP2pDevice) { lastKnownDevice = device; wifi.connectSafe(device) }
     fun forceReset() = wifi.forceReset()
+    fun tryReconnect() { lastKnownDevice?.let { wifi.connectSafe(it) } }
     fun currentPeerIp(): String? = peerIp
     fun lastKnownPeerIp(): String? = lastKnownPeer
+    fun hasLastDevice(): Boolean = lastKnownDevice != null
     fun isInGroup(): Boolean = myIp != null && udp.isBound()
 
-    // ============ Call control ============
     fun call(ip: String) {
         if (callState != CallState.IDLE) return
         callState = CallState.CALLING
-        peerIp = ip
-        lastKnownPeer = ip
+        peerIp = ip; lastKnownPeer = ip
         lastPacketAt = System.currentTimeMillis()
         scope.launch {
             sendPacket(PacketType.CALL_INVITE, ip, ByteArray(0))
@@ -99,8 +98,7 @@ class MeshNode(
 
     fun acceptCall(ip: String) {
         callState = CallState.IN_CALL
-        peerIp = ip
-        lastKnownPeer = ip
+        peerIp = ip; lastKnownPeer = ip
         lastPacketAt = System.currentTimeMillis()
         startCallLoops()
         scope.launch {
@@ -137,16 +135,13 @@ class MeshNode(
         }
     }
 
-    // ============ Keepalive + watchdog ============
     private fun startCallLoops() {
         stopCallLoops()
-        keepaliveSent = 0
         keepaliveJob = scope.launch {
             while (isActive && callState == CallState.IN_CALL) {
                 delay(KEEPALIVE_MS)
                 val ip = peerIp ?: break
                 sendPacket(PacketType.KEEPALIVE, ip, ByteArray(0))
-                keepaliveSent++
             }
         }
         watchdogJob = scope.launch {
@@ -168,7 +163,6 @@ class MeshNode(
         watchdogJob?.cancel(); watchdogJob = null
     }
 
-    // ============ Packet I/O ============
     private suspend fun sendPacket(type: PacketType, destIp: String, payload: ByteArray) {
         val pkt = MeshPacket(type, myId, MeshPacket.BROADCAST, System.nanoTime(), payload)
         udp.send(destIp, MeshPacket.encode(pkt))
@@ -183,26 +177,19 @@ class MeshNode(
             PacketType.HELLO -> {
                 logger.d("← HELLO from $fromIp")
                 if (peerIp == null && myIp != null && callState == CallState.IDLE) {
-                    peerIp = fromIp
-                    lastKnownPeer = fromIp
+                    peerIp = fromIp; lastKnownPeer = fromIp
                     logger.d("GO learned client IP: $fromIp")
                     onGroupFormed?.invoke(myIp!!, fromIp, true)
                 }
             }
-            PacketType.KEEPALIVE -> {
-                if (keepaliveSent % HELLO_LOG_EVERY == 0) {
-                    logger.d("← KEEPALIVE from $fromIp")
-                }
-            }
+            PacketType.KEEPALIVE -> { }
             PacketType.CALL_INVITE -> {
                 logger.d("← CALL_INVITE from $fromIp (state=$callState)")
-                peerIp = fromIp
-                lastKnownPeer = fromIp
+                peerIp = fromIp; lastKnownPeer = fromIp
                 if (callState == CallState.IDLE) {
                     callState = CallState.RINGING
                     onIncomingCall?.invoke(fromIp)
                 } else {
-                    logger.w("busy — sending CALL_BYE")
                     sendPacket(PacketType.CALL_BYE, fromIp, ByteArray(0))
                 }
             }

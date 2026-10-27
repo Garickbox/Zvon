@@ -13,7 +13,7 @@ class AudioPipeline(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val encoder = OpusEncoderWrapper(logger)
     private val decoder = OpusDecoderWrapper(logger)
-    private val jitterBuffer = JitterBuffer(60L, AudioConfig.FRAME_DURATION_MS.toLong())
+    private val jitterBuffer = JitterBuffer(80L, AudioConfig.FRAME_DURATION_MS.toLong())
     private lateinit var capture: AudioCapture
     private lateinit var playback: AudioPlayback
     private val loopbackSeq = AtomicLong(0)
@@ -30,17 +30,13 @@ class AudioPipeline(
         playback = AudioPlayback(jitterBuffer, decoder, logger)
         if (mode == PipelineMode.RAW_CODEC) playback.isRawMode = true
         playback.start()
-
         capture = AudioCapture(
             onPcmFrameReady = ::onPcmFrame,
             audioSource = android.media.MediaRecorder.AudioSource.VOICE_COMMUNICATION,
             logger = logger
         )
         capture.start()
-
-        if (mode == PipelineMode.NETWORK && peerIp != null) {
-            voiceTransport?.startCall(peerIp)
-        }
+        if (mode == PipelineMode.NETWORK && peerIp != null) voiceTransport?.startCall(peerIp)
     }
 
     fun onNetworkVoicePacket(seq: Long, opusData: ByteArray) {
@@ -48,9 +44,9 @@ class AudioPipeline(
     }
 
     fun statsString(): String {
-        val j = jitterBuffer.stats()
+        val v = voiceTransport?.statsString() ?: "n/a"
         return "tx=${playback.framesWritten} plc=${playback.plcFramesWritten} " +
-                "und=${playback.underrunCount} rx=$j"
+               "und=${playback.underrunCount} voice=[$v] jitter=[${jitterBuffer.stats()}]"
     }
 
     suspend fun stop() {
@@ -60,7 +56,7 @@ class AudioPipeline(
         logger.d(
             "Pipeline stopped: mode=$mode frames=${playback.framesWritten} " +
             "plc=${playback.plcFramesWritten} underruns=${playback.underrunCount} " +
-            "jitter=[${jitterBuffer.stats()}]"
+            "jitter=[${jitterBuffer.stats()}] voice=[${voiceTransport?.statsString() ?: "n/a"}]"
         )
         if (playback.isThreadAlive()) {
             logger.e("Skipping codec release — playback thread leaked")

@@ -12,15 +12,25 @@ class VoiceTransport(
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val seq = AtomicLong(0)
-    private val queue = Channel<Frame>(capacity = 8)
+    private val queue = Channel<Frame>(capacity = 12)
+
+    private val sentFrames = AtomicLong(0)
+    private val droppedFrames = AtomicLong(0)
+    private var firstSentAt = 0L
+    private var lastSentAt = 0L
 
     @Volatile private var peerIp: String? = null
 
     init {
         scope.launch {
             for (f in queue) {
-                try { sendFn(f.seq, f.opusData, f.ip) }
-                catch (e: Exception) { logger.w("voice send: ${e.message}") }
+                try {
+                    sendFn(f.seq, f.opusData, f.ip)
+                    sentFrames.incrementAndGet()
+                    val now = System.currentTimeMillis()
+                    if (firstSentAt == 0L) firstSentAt = now
+                    lastSentAt = now
+                } catch (e: Exception) { logger.w("voice send: ${e.message}") }
             }
         }
     }
@@ -28,20 +38,30 @@ class VoiceTransport(
     fun startCall(ip: String) {
         peerIp = ip
         seq.set(0)
-        while (queue.tryReceive().isSuccess) { /* drain */ }
+        sentFrames.set(0); droppedFrames.set(0)
+        firstSentAt = 0; lastSentAt = 0
+        while (queue.tryReceive().isSuccess) { }
     }
 
     fun onEncoded(opusData: ByteArray) {
         val ip = peerIp ?: return
         val s = seq.incrementAndGet()
         if (!queue.trySend(Frame(s, opusData, ip)).isSuccess) {
-            logger.w("voice queue full, dropped seq=$s")
+            droppedFrames.incrementAndGet()
+            logger.w("voice queue full, dropped seq=$s (total=${droppedFrames.get()})")
         }
     }
 
     fun onSilence() { seq.incrementAndGet() }
 
     fun endCall() { peerIp = null; seq.set(0) }
+
+    fun statsString(): String {
+        val sent = sentFrames.get(); val dropped = droppedFrames.get()
+        val durMs = if (firstSentAt == 0L) 0L else lastSentAt - firstSentAt
+        val pps = if (durMs > 0) sent * 1000.0 / durMs else 0.0
+        return "tx=$sent dropped=$dropped pps=${"%.1f".format(pps)}"
+    }
 
     fun close() { queue.close(); scope.cancel() }
 }
