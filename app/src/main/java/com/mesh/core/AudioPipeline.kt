@@ -18,12 +18,15 @@ class AudioPipeline(
     private lateinit var playback: AudioPlayback
     private val loopbackSeq = AtomicLong(0)
 
+    @Volatile var muted: Boolean = false
+
     private val voiceTransport: VoiceTransport? = if (mode == PipelineMode.NETWORK) {
         requireNotNull(voiceSender) { "voiceSender required for NETWORK" }
         VoiceTransport(voiceSender, logger)
     } else null
 
     fun start(peerIp: String? = null) {
+        logger.d("AudioPipeline.start mode=$mode peer=$peerIp")
         playback = AudioPlayback(jitterBuffer, decoder, logger)
         if (mode == PipelineMode.RAW_CODEC) playback.isRawMode = true
         playback.start()
@@ -38,15 +41,14 @@ class AudioPipeline(
         if (mode == PipelineMode.NETWORK && peerIp != null) {
             voiceTransport?.startCall(peerIp)
         }
-        logger.d("AudioPipeline started (mode=$mode)")
     }
 
-    /** Входящий голос из сети. */
     fun onNetworkVoicePacket(seq: Long, opusData: ByteArray) {
         jitterBuffer.receive(seq, opusData)
     }
 
     suspend fun stop() {
+        logger.d("AudioPipeline.stop mode=$mode")
         capture.stop()
         playback.stop()
         logger.d(
@@ -64,6 +66,10 @@ class AudioPipeline(
     }
 
     private fun onPcmFrame(pcm: ShortArray) {
+        if (muted) {
+            if (mode == PipelineMode.NETWORK) voiceTransport?.onSilence()
+            return
+        }
         when (mode) {
             PipelineMode.RAW_CODEC -> when (val r = encoder.encode(pcm)) {
                 is EncodeResult.Packet -> {

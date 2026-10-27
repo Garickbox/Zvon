@@ -19,16 +19,33 @@
     <uses-feature android:name="android.hardware.microphone" android:required="true" />
     <uses-feature android:name="android.hardware.wifi.direct" android:required="true" />
 
-    <application android:allowBackup="true" android:label="Zvon" android:supportsRtl="true" android:theme="@style/Theme.AppCompat.DayNight.NoActionBar">
+    <application
+        android:name=".ZvonApp"
+        android:allowBackup="true"
+        android:label="Zvon"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.AppCompat.DayNight.NoActionBar">
+
         <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
         <service
             android:name=".MeshForegroundService"
             android:foregroundServiceType="microphone"
             android:exported="false" />
+
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
     </application>
 </manifest>

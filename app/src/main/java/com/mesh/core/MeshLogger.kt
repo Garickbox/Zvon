@@ -7,7 +7,13 @@ interface MeshLogger {
 }
 
 object AndroidMeshLogger : MeshLogger {
-    override fun d(msg: String) { android.util.Log.d("MeshCore", msg) }
-    override fun w(msg: String, t: Throwable?) { android.util.Log.w("MeshCore", msg, t) }
-    override fun e(msg: String, t: Throwable?) { android.util.Log.e("MeshCore", msg, t) }
+    override fun d(msg: String) {
+        android.util.Log.d("MeshCore", msg); InAppLogger.write('D', "MeshCore", msg)
+    }
+    override fun w(msg: String, t: Throwable?) {
+        android.util.Log.w("MeshCore", msg, t); InAppLogger.write('W', "MeshCore", msg, t)
+    }
+    override fun e(msg: String, t: Throwable?) {
+        android.util.Log.e("MeshCore", msg, t); InAppLogger.write('E', "MeshCore", msg, t)
+    }
 }

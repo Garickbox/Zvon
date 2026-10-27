@@ -11,31 +11,30 @@
             android:text="Zvon" android:textColor="#FFFFFF" android:textSize="28sp" android:textStyle="bold"/>
 
         <TextView android:id="@+id/statusText" android:layout_width="match_parent"
-            android:layout_height="wrap_content" android:layout_marginTop="12dp"
+            android:layout_height="wrap_content" android:layout_marginTop="8dp"
             android:text="Idle" android:textColor="#AAAAAA" android:textSize="13sp"/>
 
-        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-            android:text="— Loopback —" android:textColor="#666666" android:textSize="12sp"
-            android:layout_marginTop="20dp"/>
-
-        <Button android:id="@+id/btnRaw" android:layout_width="match_parent"
-            android:layout_height="wrap_content" android:text="Raw Codec Test"/>
-
-        <Button android:id="@+id/btnLoopback" android:layout_width="match_parent"
-            android:layout_height="wrap_content" android:text="Full Loopback Test"/>
-
-        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-            android:text="— Wi-Fi Direct —" android:textColor="#666666" android:textSize="12sp"
-            android:layout_marginTop="20dp"/>
-
         <Button android:id="@+id/btnDiscover" android:layout_width="match_parent"
-            android:layout_height="wrap_content" android:text="Discover Peers"/>
+            android:layout_height="wrap_content" android:layout_marginTop="12dp"
+            android:text="Discover Peers"/>
 
         <ScrollView android:layout_width="match_parent" android:layout_height="0dp"
             android:layout_weight="1" android:layout_marginTop="8dp">
             <LinearLayout android:id="@+id/peerList" android:layout_width="match_parent"
                 android:layout_height="wrap_content" android:orientation="vertical"/>
         </ScrollView>
+
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="horizontal">
+            <Button android:id="@+id/btnLoopback" android:layout_width="0dp"
+                android:layout_weight="1" android:layout_height="wrap_content" android:text="Loopback"/>
+            <Button android:id="@+id/btnRaw" android:layout_width="0dp"
+                android:layout_weight="1" android:layout_height="wrap_content" android:text="Raw"/>
+        </LinearLayout>
+
+        <Button android:id="@+id/btnShareLog" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:layout_marginTop="8dp"
+            android:text="Share Log"/>
     </LinearLayout>
 
     <LinearLayout android:id="@+id/callView" android:visibility="gone"
@@ -47,11 +46,22 @@
             android:textSize="26sp" android:textStyle="bold"/>
 
         <TextView android:id="@+id/callPeer" android:layout_width="wrap_content"
-            android:layout_height="wrap_content" android:layout_marginTop="12dp"
-            android:text="" android:textColor="#AAAAAA" android:textSize="15sp"/>
+            android:layout_height="wrap_content" android:layout_marginTop="8dp"
+            android:text="" android:textColor="#AAAAAA" android:textSize="14sp"/>
 
-        <Button android:id="@+id/btnHangup" android:layout_width="200dp"
-            android:layout_height="wrap_content" android:layout_marginTop="40dp"
-            android:text="Hang Up"/>
+        <TextView android:id="@+id/callDuration" android:layout_width="wrap_content"
+            android:layout_height="wrap_content" android:layout_marginTop="16dp"
+            android:text="00:00" android:textColor="#FFFFFF" android:textSize="48sp"
+            android:fontFamily="monospace"/>
+
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="horizontal" android:layout_marginTop="40dp">
+            <Button android:id="@+id/btnMute" android:layout_width="0dp"
+                android:layout_weight="1" android:layout_height="wrap_content"
+                android:layout_marginEnd="8dp" android:text="Mute"/>
+            <Button android:id="@+id/btnHangup" android:layout_width="0dp"
+                android:layout_weight="1" android:layout_height="wrap_content"
+                android:layout_marginStart="8dp" android:text="Hang Up"/>
+        </LinearLayout>
     </LinearLayout>
 </FrameLayout>
