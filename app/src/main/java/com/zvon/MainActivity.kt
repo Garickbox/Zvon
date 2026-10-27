@@ -1,9 +1,16 @@
 package com.zvon
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.app.AlertDialog
+import android.content.ComponentName
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
+import android.provider.Settings
 import android.view.View
 import android.widget.Button
 import android.widget.LinearLayout
@@ -36,6 +43,7 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+
         statusText = findViewById(R.id.statusText)
         peerList = findViewById(R.id.peerList)
         btnDiscover = findViewById(R.id.btnDiscover)
@@ -46,11 +54,17 @@ class MainActivity : AppCompatActivity() {
         callStatus = findViewById(R.id.callStatus)
         callPeer = findViewById(R.id.callPeer)
         findViewById<Button>(R.id.btnHangup).setOnClickListener { meshNode.endCall() }
+
         requestPerms()
+        requestBatteryExemption()
+        maybeShowMiuiHint()
         setupMesh()
         wireUi()
     }
 
+    // ============================================================
+    // Mesh wiring
+    // ============================================================
     private fun setupMesh() {
         meshNode = MeshNode(this)
         meshNode.onPeersChanged = { peers -> runOnUiThread { renderPeers(peers) } }
@@ -60,7 +74,7 @@ class MainActivity : AppCompatActivity() {
         } }
         meshNode.onIncomingCall = { ip -> runOnUiThread { showIncomingDialog(ip) } }
         meshNode.onCallConnected = { runOnUiThread { showInCallUi("Connected") } }
-        meshNode.onCallEnded = { runOnUiThread { hideCallUi() } }
+        meshNode.onCallEnded = { runOnUiThread { hideCallUi("Call ended") } }
         meshNode.onVoiceReceived = { seq, data -> pipeline?.onNetworkVoicePacket(seq, data) }
         meshNode.start()
     }
@@ -73,6 +87,9 @@ class MainActivity : AppCompatActivity() {
         btnLoopback.setOnClickListener { toggleLoopback(PipelineMode.FULL_LOOPBACK) }
     }
 
+    // ============================================================
+    // Loopback (не трогаем)
+    // ============================================================
     private fun toggleLoopback(mode: PipelineMode) {
         if (isStopping) return
         val p = pipeline
@@ -91,6 +108,9 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    // ============================================================
+    // Peers list
+    // ============================================================
     private fun renderPeers(peers: List<MeshNode.WifiP2pDeviceInfo>) {
         peerList.removeAllViews()
         if (peers.isEmpty()) { statusText.text = "No peers found"; return }
@@ -118,16 +138,27 @@ class MainActivity : AppCompatActivity() {
     private fun onGroupReady(myIp: String, peerIp: String?, isGo: Boolean) {
         statusText.text = "Group OK. my=$myIp peer=${peerIp ?: "?"} GO=$isGo"
         Toast.makeText(this, "Wi-Fi Direct connected", Toast.LENGTH_SHORT).show()
-        currentPeerIp = peerIp ?: return
+        currentPeerIp = peerIp
         peerList.removeAllViews()
-        peerList.addView(Button(this).apply {
-            text = "📞 Call $peerIp"
-            setOnClickListener { callPeer(peerIp) }
-        })
+        if (peerIp != null) {
+            peerList.addView(Button(this).apply {
+                text = "📞 Call $peerIp"
+                setOnClickListener { callPeer(peerIp) }
+            })
+        } else {
+            peerList.addView(TextView(this).apply {
+                text = "Waiting for peer HELLO..."
+                setTextColor(0xFFAAAAAA.toInt()); textSize = 13f
+            })
+        }
     }
 
+    // ============================================================
+    // Call flows
+    // ============================================================
     private fun callPeer(ip: String) {
         if (pipeline != null) return
+        currentPeerIp = ip
         startNetworkPipeline(ip)
         meshNode.call(ip)
         showInCallUi("Calling…")
@@ -139,13 +170,17 @@ class MainActivity : AppCompatActivity() {
             .setMessage("From $ip")
             .setCancelable(false)
             .setPositiveButton("Accept") { _, _ ->
-                startNetworkPipeline(ip); meshNode.acceptCall(ip); showInCallUi("Connected")
+                currentPeerIp = ip
+                startNetworkPipeline(ip)
+                meshNode.acceptCall(ip)
+                showInCallUi("Connected")
             }
             .setNegativeButton("Decline") { _, _ -> meshNode.declineCall(ip) }
             .show()
     }
 
     private fun startNetworkPipeline(peerIp: String) {
+        MeshForegroundService.start(this, peerIp)
         val p = AudioPipeline(
             mode = PipelineMode.NETWORK,
             voiceSender = { seq, data, ip -> meshNode.sendVoice(seq, data, ip) }
@@ -160,15 +195,61 @@ class MainActivity : AppCompatActivity() {
         callPeer.text = currentPeerIp ?: meshNode.currentPeerIp() ?: "peer"
     }
 
-    private fun hideCallUi() {
+    private fun hideCallUi(reason: String) {
         callView.visibility = View.GONE
         discoveryView.visibility = View.VISIBLE
+        callStatus.text = reason
         val p = pipeline; pipeline = null
+        MeshForegroundService.stop(this)
         if (p != null) lifecycleScope.launch { p.stop() }
     }
 
+    // ============================================================
+    // Battery / MIUI
+    // ============================================================
+    private fun requestBatteryExemption() {
+        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+        if (pm.isIgnoringBatteryOptimizations(packageName)) return
+        try {
+            startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                Uri.parse("package:$packageName")))
+        } catch (_: Exception) { }
+    }
+
+    private fun maybeShowMiuiHint() {
+        if (!Build.MANUFACTURER.equals("Xiaomi", ignoreCase = true)) return
+        val prefs = getSharedPreferences("zvon", MODE_PRIVATE)
+        if (prefs.getBoolean("miui_hint_shown", false)) return
+        prefs.edit().putBoolean("miui_hint_shown", true).apply()
+        AlertDialog.Builder(this)
+            .setTitle("Настройка MIUI")
+            .setMessage("Для надёжных звонков включите Автозапуск для Zvon в настройках MIUI. " +
+                    "Иначе система может убить звонок при заблокированном экране.")
+            .setPositiveButton("Открыть настройки") { _, _ -> openMiuiAutostart() }
+            .setNegativeButton("Позже", null)
+            .show()
+    }
+
+    @SuppressLint("BatteryLife")
+    private fun openMiuiAutostart() {
+        try {
+            startActivity(Intent().apply {
+                component = ComponentName(
+                    "com.miui.securitycenter",
+                    "com.miui.permcenter.autostart.AutoStartManagementActivity"
+                )
+            })
+        } catch (_: Exception) {
+            Toast.makeText(this, "Откройте вручную: Настройки → Приложения → Zvon → Автозапуск",
+                Toast.LENGTH_LONG).show()
+        }
+    }
+
     private fun requestPerms() {
-        val perms = mutableListOf(Manifest.permission.RECORD_AUDIO, Manifest.permission.ACCESS_FINE_LOCATION)
+        val perms = mutableListOf(
+            Manifest.permission.RECORD_AUDIO,
+            Manifest.permission.ACCESS_FINE_LOCATION
+        )
         if (Build.VERSION.SDK_INT >= 31) {
             perms += Manifest.permission.BLUETOOTH_SCAN
             perms += Manifest.permission.BLUETOOTH_CONNECT
@@ -183,6 +264,7 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         pipeline?.let { p -> lifecycleScope.launch { p.stop() } }
+        MeshForegroundService.stop(this)
         meshNode.close()
     }
 }

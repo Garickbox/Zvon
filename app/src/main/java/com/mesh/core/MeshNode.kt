@@ -12,6 +12,11 @@ class MeshNode(
     private val context: Context,
     private val logger: MeshLogger = AndroidMeshLogger
 ) {
+    companion object {
+        private const val KEEPALIVE_MS = 2_000L
+        private const val DISCONNECT_TIMEOUT_MS = 6_000L
+    }
+
     val myId: UUID = run {
         val aid = Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID)
         UUID.nameUUIDFromBytes(aid.toByteArray())
@@ -24,6 +29,10 @@ class MeshNode(
     @Volatile private var peerIp: String? = null
     @Volatile private var myIp: String? = null
     @Volatile private var callState = CallState.IDLE
+    @Volatile private var lastPacketAt = 0L
+
+    private var keepaliveJob: Job? = null
+    private var watchdogJob: Job? = null
 
     var onPeersChanged: ((List<WifiP2pDeviceInfo>) -> Unit)? = null
     var onGroupFormed: ((myIp: String, peerIp: String?, isGo: Boolean) -> Unit)? = null
@@ -68,10 +77,14 @@ class MeshNode(
     fun disconnect() = wifi.disconnect()
     fun currentPeerIp(): String? = peerIp
 
+    // ============================================================
+    // Call control
+    // ============================================================
     fun call(ip: String) {
         if (callState != CallState.IDLE) return
         callState = CallState.CALLING
         peerIp = ip
+        lastPacketAt = System.currentTimeMillis()
         scope.launch {
             sendPacket(PacketType.CALL_INVITE, ip, ByteArray(0))
             logger.d("CALL_INVITE → $ip")
@@ -81,6 +94,8 @@ class MeshNode(
     fun acceptCall(ip: String) {
         callState = CallState.IN_CALL
         peerIp = ip
+        lastPacketAt = System.currentTimeMillis()
+        startCallLoops()
         scope.launch {
             sendPacket(PacketType.CALL_ACCEPT, ip, ByteArray(0))
             onCallConnected?.invoke()
@@ -96,6 +111,7 @@ class MeshNode(
         if (callState == CallState.IDLE) return
         val ip = peerIp
         callState = CallState.IDLE
+        stopCallLoops()
         scope.launch {
             if (ip != null) sendPacket(PacketType.CALL_BYE, ip, ByteArray(0))
             onCallEnded?.invoke()
@@ -109,6 +125,38 @@ class MeshNode(
         }
     }
 
+    // ============================================================
+    // Keepalive + watchdog (только во время звонка)
+    // ============================================================
+    private fun startCallLoops() {
+        stopCallLoops()
+        keepaliveJob = scope.launch {
+            while (isActive && callState == CallState.IN_CALL) {
+                delay(KEEPALIVE_MS)
+                val ip = peerIp ?: break
+                sendPacket(PacketType.HELLO, ip, ByteArray(0))
+            }
+        }
+        watchdogJob = scope.launch {
+            while (isActive && callState == CallState.IN_CALL) {
+                delay(1_000)
+                if (System.currentTimeMillis() - lastPacketAt > DISCONNECT_TIMEOUT_MS) {
+                    logger.w("call timeout — no packets for ${DISCONNECT_TIMEOUT_MS}ms")
+                    endCall()
+                    break
+                }
+            }
+        }
+    }
+
+    private fun stopCallLoops() {
+        keepaliveJob?.cancel(); keepaliveJob = null
+        watchdogJob?.cancel(); watchdogJob = null
+    }
+
+    // ============================================================
+    // Packet I/O
+    // ============================================================
     private suspend fun sendPacket(type: PacketType, destIp: String, payload: ByteArray) {
         val pkt = MeshPacket(type, myId, MeshPacket.BROADCAST, System.nanoTime(), payload)
         udp.send(destIp, MeshPacket.encode(pkt))
@@ -116,10 +164,20 @@ class MeshNode(
 
     private suspend fun onUdpPacket(fromIp: String, data: ByteArray) {
         val pkt = MeshPacket.decode(data) ?: return
-        peerIp = fromIp
+        lastPacketAt = System.currentTimeMillis()
+
         when (pkt.type) {
-            PacketType.HELLO -> logger.d("HELLO from $fromIp")
+            PacketType.HELLO -> {
+                logger.d("HELLO from $fromIp")
+                // SYMMETRIC CALL: на GO обновляем peerIp и уведомляем UI
+                if (peerIp == null && myIp != null && callState == CallState.IDLE) {
+                    peerIp = fromIp
+                    logger.d("GO learned client IP: $fromIp")
+                    onGroupFormed?.invoke(myIp!!, fromIp, true)
+                }
+            }
             PacketType.CALL_INVITE -> {
+                peerIp = fromIp
                 if (callState == CallState.IDLE) {
                     callState = CallState.RINGING
                     onIncomingCall?.invoke(fromIp)
@@ -130,12 +188,14 @@ class MeshNode(
             PacketType.CALL_ACCEPT -> {
                 if (callState == CallState.CALLING) {
                     callState = CallState.IN_CALL
+                    startCallLoops()
                     onCallConnected?.invoke()
                 }
             }
             PacketType.CALL_BYE -> {
                 if (callState != CallState.IDLE) {
                     callState = CallState.IDLE
+                    stopCallLoops()
                     onCallEnded?.invoke()
                 }
             }
@@ -148,5 +208,8 @@ class MeshNode(
         }
     }
 
-    fun close() { wifi.stop(); udp.stop(); scope.cancel() }
+    fun close() {
+        stopCallLoops()
+        wifi.stop(); udp.stop(); scope.cancel()
+    }
 }
