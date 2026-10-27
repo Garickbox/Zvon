@@ -45,6 +45,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var callStatus: TextView
     private lateinit var callPeer: TextView
     private lateinit var callDuration: TextView
+    private lateinit var callStats: TextView
     private lateinit var btnMute: Button
 
     private var isStopping = false
@@ -68,6 +69,7 @@ class MainActivity : AppCompatActivity() {
         callStatus = findViewById(R.id.callStatus)
         callPeer = findViewById(R.id.callPeer)
         callDuration = findViewById(R.id.callDuration)
+        callStats = findViewById(R.id.callStats)
         btnMute = findViewById(R.id.btnMute)
         findViewById<Button>(R.id.btnHangup).setOnClickListener { meshNode.endCall() }
         btnMute.setOnClickListener { toggleMute() }
@@ -86,19 +88,21 @@ class MainActivity : AppCompatActivity() {
         meshNode.onPeersChanged = { peers -> runOnUiThread { renderPeers(peers) } }
         meshNode.onGroupFormed = { myIp, peerIp, isGo -> runOnUiThread { onGroupReady(myIp, peerIp, isGo) } }
         meshNode.onGroupLost = { runOnUiThread {
-            statusText.text = "Group lost"; peerList.removeAllViews(); currentPeerIp = null
+            statusText.text = "Group lost"
+            peerList.removeAllViews()
+            currentPeerIp = null
         } }
         meshNode.onIncomingCall = { ip -> runOnUiThread { showIncomingDialog(ip) } }
         meshNode.onCallConnected = { runOnUiThread { showInCallUi("Connected"); startDurationTimer() } }
-        meshNode.onCallEnded = { runOnUiThread { hideCallUi("Call ended") } }
+        meshNode.onCallEnded = { reason -> runOnUiThread { hideCallUi(reason) } }
         meshNode.onVoiceReceived = { seq, data -> pipeline?.onNetworkVoicePacket(seq, data) }
         meshNode.start()
     }
 
     private fun wireUi() {
         btnForceReset.setOnClickListener {
-            InAppLogger.write('I', "UI", "forceReset tapped")
-            statusText.text = "Force reset: cancel + remove group..."
+            InAppLogger.write('I', "UI", "forceReset")
+            statusText.text = "Force reset…"
             peerList.removeAllViews()
             meshNode.forceReset()
         }
@@ -129,7 +133,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun renderPeers(peers: List<MeshNode.WifiP2pDeviceInfo>) {
         peerList.removeAllViews()
-        if (peers.isEmpty()) { statusText.text = "No peers found"; return }
+        if (peers.isEmpty()) { statusText.text = "No peers"; return }
         statusText.text = "Found ${peers.size} peer(s)"
         peers.forEach { peer ->
             val row = LinearLayout(this).apply {
@@ -145,19 +149,17 @@ class MainActivity : AppCompatActivity() {
                 setOnClickListener { btn ->
                     isEnabled = false
                     text = "Connecting…"
-                    statusText.text = "Cleanup + connect to ${peer.address}…"
-                    InAppLogger.write('I', "UI", "connectSafe to ${peer.address}")
+                    statusText.text = "Connect to ${peer.address}…"
+                    InAppLogger.write('I', "UI", "connect to ${peer.address}")
                     meshNode.connectTo(peer.raw)
-                    (btn as? Button)?.postDelayed({
-                        if (isEnabled.not()) {
-                            isEnabled = true
-                            text = "Connect"
+                    (btn as Button).postDelayed({
+                        if (!isEnabled) {
+                            isEnabled = true; text = "Connect"
                             if (currentPeerIp == null) {
-                                statusText.text = "Connect timeout. Tap Force Reset, then retry (or toggle Wi-Fi on both phones)."
-                                InAppLogger.write('W', "UI", "connect timeout (20s)")
+                                statusText.text = "Connect timeout. Force Reset + retry (or toggle Wi-Fi both)."
                             }
                         }
-                    }, 20_000)
+                    }, 25_000)
                 }
             })
             peerList.addView(row)
@@ -194,7 +196,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showIncomingDialog(ip: String) {
-        InAppLogger.write('I', "UI", "incoming call from $ip")
+        InAppLogger.write('I', "UI", "incoming from $ip")
         AlertDialog.Builder(this)
             .setTitle("Incoming call")
             .setMessage("From $ip")
@@ -233,18 +235,32 @@ class MainActivity : AppCompatActivity() {
         exitCallAudioMode()
         callView.visibility = View.GONE
         discoveryView.visibility = View.VISIBLE
-        statusText.text = reason
+
         val p = pipeline; pipeline = null
         MeshForegroundService.stop(this)
         if (p != null) lifecycleScope.launch { p.stop() }
         InAppLogger.write('I', "UI", "call ended: $reason")
+
+        // Не теряем группу — если она всё ещё активна, предлагаем "Call again"
+        if (meshNode.isInGroup()) {
+            val peer = meshNode.currentPeerIp() ?: meshNode.lastKnownPeerIp()
+            statusText.text = "Group active ($reason). Peer=$peer"
+            peerList.removeAllViews()
+            if (peer != null) {
+                peerList.addView(Button(this).apply {
+                    text = "📞 Call again $peer"
+                    setOnClickListener { callPeer(peer) }
+                })
+            }
+        } else {
+            statusText.text = "Call ended ($reason). Group lost — Discover again."
+        }
     }
 
     private fun toggleMute() {
         val p = pipeline ?: return
         p.muted = !p.muted
         btnMute.text = if (p.muted) "Unmute" else "Mute"
-        InAppLogger.write('I', "UI", "mute=${p.muted}")
     }
 
     private fun startDurationTimer() {
@@ -254,6 +270,7 @@ class MainActivity : AppCompatActivity() {
             while (isActive) {
                 val secs = (System.currentTimeMillis() - callStartMs) / 1000
                 callDuration.text = String.format(Locale.US, "%02d:%02d", secs / 60, secs % 60)
+                pipeline?.let { callStats.text = it.statsString() }
                 delay(500)
             }
         }
@@ -262,41 +279,37 @@ class MainActivity : AppCompatActivity() {
     private fun stopDurationTimer() {
         durationJob?.cancel(); durationJob = null
         callDuration.text = "00:00"
+        callStats.text = ""
     }
 
     private fun enterCallAudioMode() {
         try {
             val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
             am.mode = AudioManager.MODE_IN_COMMUNICATION
-            InAppLogger.write('I', "Audio", "mode=IN_COMMUNICATION")
-        } catch (e: Exception) { InAppLogger.write('W', "Audio", "mode fail: ${e.message}") }
+        } catch (e: Exception) { InAppLogger.write('W', "Audio", "mode: ${e.message}") }
     }
 
     private fun exitCallAudioMode() {
         try {
-            val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
-            am.mode = AudioManager.MODE_NORMAL
+            (getSystemService(Context.AUDIO_SERVICE) as AudioManager).mode = AudioManager.MODE_NORMAL
         } catch (_: Exception) { }
     }
 
     private fun shareLog() {
         InAppLogger.flush()
         val f = InAppLogger.currentFile()
-        if (f == null || !f.exists()) {
-            Toast.makeText(this, "Log not ready", Toast.LENGTH_SHORT).show(); return
-        }
+        if (f == null || !f.exists()) { Toast.makeText(this, "Log not ready", Toast.LENGTH_SHORT).show(); return }
         try {
             val uri: Uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", f)
             val intent = Intent(Intent.ACTION_SEND).apply {
                 type = "text/plain"
                 putExtra(Intent.EXTRA_STREAM, uri)
-                putExtra(Intent.EXTRA_SUBJECT, "Zvon log (${f.length() / 1024}KB)")
+                putExtra(Intent.EXTRA_SUBJECT, "Zvon log")
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
             startActivity(Intent.createChooser(intent, "Share log"))
         } catch (e: Exception) {
             Toast.makeText(this, "Share failed: ${e.message}", Toast.LENGTH_LONG).show()
-            InAppLogger.write('E', "UI", "share failed", e)
         }
     }
 
@@ -316,7 +329,7 @@ class MainActivity : AppCompatActivity() {
         prefs.edit().putBoolean("miui_hint_shown", true).apply()
         AlertDialog.Builder(this)
             .setTitle("Настройка MIUI")
-            .setMessage("Для надёжных звонков включите Автозапуск для Zvon. Иначе система может убить звонок при заблокированном экране.")
+            .setMessage("Включите Автозапуск для Zvon в настройках MIUI, иначе звонок может умереть на погасшем экране.")
             .setPositiveButton("Открыть") { _, _ -> openMiuiAutostart() }
             .setNegativeButton("Позже", null)
             .show()
@@ -337,10 +350,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun requestPerms() {
-        val perms = mutableListOf(
-            Manifest.permission.RECORD_AUDIO,
-            Manifest.permission.ACCESS_FINE_LOCATION
-        )
+        val perms = mutableListOf(Manifest.permission.RECORD_AUDIO, Manifest.permission.ACCESS_FINE_LOCATION)
         if (Build.VERSION.SDK_INT >= 31) {
             perms += Manifest.permission.BLUETOOTH_SCAN
             perms += Manifest.permission.BLUETOOTH_CONNECT
@@ -352,10 +362,7 @@ class MainActivity : AppCompatActivity() {
         ActivityCompat.requestPermissions(this, perms.toTypedArray(), 1)
     }
 
-    override fun onPause() {
-        super.onPause()
-        InAppLogger.flush()
-    }
+    override fun onPause() { super.onPause(); InAppLogger.flush() }
 
     override fun onDestroy() {
         InAppLogger.write('I', "UI", "onDestroy")

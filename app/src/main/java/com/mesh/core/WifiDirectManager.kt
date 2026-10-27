@@ -110,22 +110,42 @@ class WifiDirectManager(
                 deviceAddress = device.deviceAddress
                 groupOwnerIntent = 0  // system chooses GO
             }
-            logger.d("connectSafe: connect to ${device.deviceAddress}")
-            try {
-                manager?.connect(channel, config, object : WifiP2pManager.ActionListener {
-                    override fun onSuccess() =
-                        logger.d("connectSafe: connect initiated — awaiting negotiation")
-                    override fun onFailure(reason: Int) {
-                        val r = when (reason) {
-                            WifiP2pManager.BUSY -> "BUSY"
-                            WifiP2pManager.ERROR -> "ERROR"
-                            WifiP2pManager.P2P_UNSUPPORTED -> "P2P_UNSUPPORTED"
-                            else -> "reason=$reason"
+            var success = false
+            for (attempt in 1..3) {
+                logger.d("connectSafe: attempt $attempt to ${device.deviceAddress}")
+                success = try {
+                    val ok = CompletableDeferred<Boolean>()
+                    manager?.connect(channel, config, object : WifiP2pManager.ActionListener {
+                        override fun onSuccess() {
+                            logger.d("connectSafe: initiated — awaiting negotiation")
+                            ok.complete(true)
                         }
-                        logger.w("connectSafe: connect failed $r")
-                    }
-                })
-            } catch (e: Exception) { logger.e("connectSafe: exception", e) }
+                        override fun onFailure(reason: Int) {
+                            val r = when (reason) {
+                                WifiP2pManager.BUSY -> "BUSY"
+                                WifiP2pManager.ERROR -> "ERROR"
+                                WifiP2pManager.P2P_UNSUPPORTED -> "P2P_UNSUPPORTED"
+                                else -> "reason=$reason"
+                            }
+                            logger.w("connectSafe: failed $r")
+                            ok.complete(false)
+                        }
+                    }) ?: ok.complete(false)
+                    ok.await()
+                } catch (e: Exception) { logger.e("connectSafe: exception", e); false }
+
+                if (success) break
+                if (attempt < 3) {
+                    logger.d("connectSafe: retry in 2s")
+                    delay(2000)
+                    try { manager?.cancelConnect(channel, null) } catch (_: Exception) { }
+                    delay(500)
+                }
+            }
+
+            if (!success) {
+                logger.e("connectSafe: all 3 attempts failed — try Force Reset")
+            }
         }
     }
 

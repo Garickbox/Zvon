@@ -47,6 +47,12 @@ class AudioPipeline(
         jitterBuffer.receive(seq, opusData)
     }
 
+    fun statsString(): String {
+        val j = jitterBuffer.stats()
+        return "tx=${playback.framesWritten} plc=${playback.plcFramesWritten} " +
+                "und=${playback.underrunCount} rx=$j"
+    }
+
     suspend fun stop() {
         logger.d("AudioPipeline.stop mode=$mode")
         capture.stop()
