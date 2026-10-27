@@ -13,7 +13,7 @@ class AudioPipeline(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val encoder = OpusEncoderWrapper(logger)
     private val decoder = OpusDecoderWrapper(logger)
-    private val jitterBuffer = JitterBuffer(80L, AudioConfig.FRAME_DURATION_MS.toLong())
+    private val jitterBuffer = JitterBuffer(120L, AudioConfig.FRAME_DURATION_MS.toLong())
     private lateinit var capture: AudioCapture
     private lateinit var playback: AudioPlayback
     private val loopbackSeq = AtomicLong(0)

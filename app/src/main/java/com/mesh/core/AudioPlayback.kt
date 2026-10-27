@@ -8,7 +8,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.atomic.AtomicBoolean
-import java.util.concurrent.locks.LockSupport
 
 class AudioPlayback(
     private val jitterBuffer: JitterBuffer,
@@ -16,10 +15,11 @@ class AudioPlayback(
     private val logger: MeshLogger = AndroidMeshLogger
 ) {
     companion object {
-        private const val FRAME_NS = AudioConfig.FRAME_DURATION_MS * 1_000_000L
-        private const val DRIFT_RESYNC_NS = 150_000_000L
         private const val JOIN_TIMEOUT_MS = 3_000L
-        private const val TRACK_BUFFER_FRAMES = 4
+        // BATCH = 4 кадра = 80 мс за один write. Меньше вызовов write
+        // (12.5 Hz вместо 50 Hz) → amortize HAL overhead → правильные 50 fps.
+        private const val BATCH_FRAMES = 4
+        private const val TRACK_BUFFER_FRAMES = 6  // 120 мс внутри AudioTrack
     }
 
     private val running = AtomicBoolean(false)
@@ -32,12 +32,11 @@ class AudioPlayback(
     @Volatile var framesWritten = 0L; private set
     @Volatile var plcFramesWritten = 0L; private set
     @Volatile var underrunCount = 0L; private set
-    private var driftResyncCount = 0
 
     fun start() {
         if (!running.compareAndSet(false, true)) return
         playbackThread = Thread({ playbackLoop() }, "MeshAudioPlayback").apply { start() }
-        logger.d("AudioPlayback start requested")
+        logger.d("AudioPlayback start (batch=$BATCH_FRAMES, trackBuf=$TRACK_BUFFER_FRAMES)")
     }
 
     fun writeDirect(pcm: ShortArray) {
@@ -54,10 +53,10 @@ class AudioPlayback(
         val thread = playbackThread
         if (thread != null) {
             withContext(Dispatchers.IO) { thread.join(JOIN_TIMEOUT_MS) }
-            if (thread.isAlive) { leakedThread = thread }
+            if (thread.isAlive) leakedThread = thread
         }
         playbackThread = null
-        logger.d("AudioPlayback stopped (driftResyncs=$driftResyncCount)")
+        logger.d("AudioPlayback stopped")
     }
 
     private fun playbackLoop() {
@@ -67,29 +66,33 @@ class AudioPlayback(
         audioTrack = track
         try {
             track.play()
-            var nextDeadlineNs = System.nanoTime() + FRAME_NS
+            val batchSize = AudioConfig.FRAME_SAMPLES * BATCH_FRAMES
+            val batchBuffer = ShortArray(batchSize)
+
             while (running.get()) {
-                val pcm: ShortArray? = if (isRawMode) {
-                    directQueue.poll() ?: ShortArray(AudioConfig.FRAME_SAMPLES)
-                } else {
-                    val opus = jitterBuffer.getNextFrame()
-                    if (opus != null) decoder.decode(opus)
-                    else { plcFramesWritten++; decoder.decodePlc() }
+                // Заполняем батч из 4 кадров
+                var anyData = false
+                for (i in 0 until BATCH_FRAMES) {
+                    val pcm: ShortArray? = if (isRawMode) {
+                        directQueue.poll()
+                    } else {
+                        val opus = jitterBuffer.getNextFrame()
+                        if (opus != null) decoder.decode(opus) else null
+                    }
+                    val frame = pcm ?: ShortArray(AudioConfig.FRAME_SAMPLES)
+                    if (pcm != null) anyData = true
+                    else plcFramesWritten++
+                    System.arraycopy(frame, 0, batchBuffer, i * AudioConfig.FRAME_SAMPLES, AudioConfig.FRAME_SAMPLES)
                 }
-                val toWrite = pcm ?: ShortArray(AudioConfig.FRAME_SAMPLES)
+
+                // Один большой write — блокирует пока есть место в AudioTrack.
+                // В steady state AudioTrack буфер 120 мс, батч 80 мс →
+                // каждый write блокирует ~80 мс. Playback fps = 50 (правильно).
                 try {
-                    val written = track.write(toWrite, 0, toWrite.size, AudioTrack.WRITE_BLOCKING)
-                    if (written > 0) framesWritten++
-                    if (written < toWrite.size && written >= 0) underrunCount++
+                    val written = track.write(batchBuffer, 0, batchSize, AudioTrack.WRITE_BLOCKING)
+                    if (written > 0) framesWritten += BATCH_FRAMES
+                    if (written < batchSize && written >= 0) underrunCount++
                 } catch (e: Exception) { logger.e("write failed", e); return }
-                val now = System.nanoTime()
-                val sleepNs = nextDeadlineNs - now
-                if (sleepNs > 0) LockSupport.parkNanos(sleepNs)
-                else if (-sleepNs > DRIFT_RESYNC_NS) {
-                    driftResyncCount++
-                    nextDeadlineNs = now + FRAME_NS; continue
-                }
-                nextDeadlineNs += FRAME_NS
             }
         } finally {
             audioTrack = null

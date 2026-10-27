@@ -2,12 +2,13 @@ package com.mesh.core
 import java.util.TreeMap
 
 class JitterBuffer(
-    private val targetDelayMs: Long = 80L,
+    private val targetDelayMs: Long = 120L,   // 6 кадров prefill
     private val frameDurationMs: Long = 20L,
-    private val maxCapacity: Int = 50,
-    private val maxConsecutivePlc: Int = 12,
-    private val startTimeoutMs: Long = 600L,
-    private val starvationResetMs: Long = 500L
+    private val maxCapacity: Int = 100,       // 2 сек буфер
+    private val maxConsecutivePlc: Int = 20,  // 400 мс тишины до reset
+    private val startTimeoutMs: Long = 800L,
+    private val starvationResetMs: Long = 800L,
+    private val graceMs: Long = 200L
 ) {
     private val buffer = TreeMap<Long, ByteArray>()
     private var lastPlayedSeq: Long = -1
@@ -23,6 +24,7 @@ class JitterBuffer(
     var packetsOverflow = 0L; private set
     var plcFramesGenerated = 0L; private set
     var resetsDueToStarvation = 0L; private set
+    var graceWaits = 0L; private set
 
     @Synchronized
     fun receive(seq: Long, payload: ByteArray, nowMs: Long = System.currentTimeMillis()) {
@@ -47,9 +49,27 @@ class JitterBuffer(
         }
         val expected = lastPlayedSeq + 1
         val packet = buffer.remove(expected)
+        if (packet != null) {
+            lastPlayedSeq = expected
+            consecutivePlc = 0
+            packetsPlayed++
+            return packet
+        }
+
+        // Miss. Проверяем: пакет реально потерян или ещё в пути?
+        if (buffer.isEmpty()) {
+            // Буфер пуст. Возможно пакет задерживается в сети.
+            // Grace period: не двигаем lastPlayedSeq пока не истекло graceMs.
+            if (nowMs - lastActivityMs < graceMs) {
+                graceWaits++
+                return null  // тишина без PLC (не считаем потерю)
+            }
+        }
+
+        // Реальная потеря (либо буфер непуст с бо́льшим seq, либо grace истёк)
         lastPlayedSeq = expected
-        if (packet != null) { consecutivePlc = 0; packetsPlayed++; return packet }
         packetsLost++; plcFramesGenerated++; consecutivePlc++
+
         if (consecutivePlc > maxConsecutivePlc && buffer.isEmpty() && nowMs - lastActivityMs > starvationResetMs) {
             reset(); resetsDueToStarvation++
         }
@@ -64,5 +84,6 @@ class JitterBuffer(
 
     @Synchronized fun depth(): Int = buffer.size
     @Synchronized fun stats(): String =
-        "rx=$packetsReceived late=$packetsLate lost=$packetsLost plc=$plcFramesGenerated reset=$resetsDueToStarvation depth=${buffer.size}"
+        "rx=$packetsReceived late=$packetsLate lost=$packetsLost plc=$plcFramesGenerated " +
+        "grace=$graceWaits reset=$resetsDueToStarvation depth=${buffer.size}"
 }
