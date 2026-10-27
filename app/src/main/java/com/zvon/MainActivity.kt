@@ -119,7 +119,27 @@ class MainActivity : AppCompatActivity() {
                 statusText.text = "📎 $name: $pct%"
             }
         } }
+        meshNode.onContactsChanged = { runOnUiThread { renderContacts() } }
         meshNode.start()
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+            if (meshNode.hasLastDevice()) meshNode.tryAutoReconnect()
+        }, 2000)
+    }
+
+    private fun renderContacts() {
+        if (peerList.childCount > 0) return
+        val contacts = meshNode.contactsStore.all()
+        if (contacts.isEmpty()) return
+        peerList.removeAllViews()
+        for (c in contacts) {
+            val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, 12, 0, 12) }
+            row.addView(TextView(this).apply {
+                text = (if (c.online) "🟢 " else "⚪ ") + c.name + "\n" + c.lastIp
+                setTextColor(0xFFFFFFFF.toInt()); textSize = 14f
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            })
+            peerList.addView(row)
+        }
     }
 
     private fun wireUi() {
