@@ -25,6 +25,24 @@ class MeshNode(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val wifi = WifiDirectManager(context, scope, logger)
     private val udp = UdpMeshTransport(scope, ::onUdpPacket, logger)
+    val chatStore = ChatStore(context)
+    private val saveDir = java.io.File(
+        android.os.Environment.getExternalStoragePublicDirectory(
+            android.os.Environment.DIRECTORY_DOWNLOADS), "Zvon").apply { mkdirs() }
+    private val fileTransfer = FileTransferManager(
+        scope, context.contentResolver, saveDir,
+        onProgress = { id, name, sent, total, done, err ->
+            onFileProgress?.invoke(id, name, sent, total, done, err)
+        },
+        onIncomingOffer = { id, name, size, ip ->
+            onFileOffer?.invoke(id, name, size, ip) ?: false
+        },
+        logger = logger
+    )
+
+    var onTextReceived: ((fromNodeId: String, fromIp: String, text: String) -> Unit)? = null
+    var onFileOffer: (suspend (id: String, name: String, size: Long, ip: String) -> Boolean)? = null
+    var onFileProgress: ((id: String, name: String, sent: Long, total: Long, done: Boolean, err: String?) -> Unit)? = null
 
     @Volatile private var peerIp: String? = null
     @Volatile private var myIp: String? = null
@@ -58,6 +76,7 @@ class MeshNode(
             peerIp = if (st.isGroupOwner) peerIp else st.goIp
             if (!st.isGroupOwner) lastKnownPeer = st.goIp
             udp.start(st.myIp)
+            fileTransfer.startServer(st.myIp)
             if (!st.isGroupOwner) {
                 scope.launch {
                     delay(500)
@@ -127,6 +146,23 @@ class MeshNode(
             onCallEnded?.invoke("you hung up")
         }
     }
+
+    fun sendText(destNodeId: String, destIp: String, text: String) {
+        scope.launch {
+            val payload = TextPayload(text).encode()
+            sendPacket(PacketType.TEXT, destIp, payload)
+            chatStore.add(destNodeId, Message(0, destNodeId, true, "text", text, null, System.currentTimeMillis()))
+            logger.d("→ TEXT to ${destNodeId.take(8)}: ${text.take(30)}")
+        }
+    }
+
+    fun sendFile(uri: android.net.Uri, destIp: String, destNodeId: String) {
+        fileTransfer.sendFile(uri, destIp)
+        chatStore.add(destNodeId, Message(0, destNodeId, true, "file",
+            uri.lastPathSegment ?: "file", null, System.currentTimeMillis()))
+    }
+
+    fun saveDir(): java.io.File = saveDir
 
     fun sendVoice(seq: Long, opusData: ByteArray, destIp: String) {
         scope.launch {
@@ -215,11 +251,20 @@ class MeshNode(
                     onVoiceReceived?.invoke(vp.seq, vp.opusData)
                 }
             }
+            PacketType.TEXT -> {
+                val tp = TextPayload.decode(pkt.payload) ?: return
+                val fromNode = pkt.sourceId.toString()
+                logger.d("← TEXT from ${fromNode.take(8)}: ${tp.text.take(30)}")
+                chatStore.add(fromNode, Message(0, fromNode, false, "text", tp.text, null, System.currentTimeMillis()))
+                onTextReceived?.invoke(fromNode, fromIp, tp.text)
+            }
+            else -> { }
         }
     }
 
     fun close() {
         stopCallLoops()
+        fileTransfer.close()
         wifi.stop(); udp.stop(); scope.cancel()
     }
 }

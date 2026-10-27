@@ -93,6 +93,32 @@ class MainActivity : AppCompatActivity() {
         meshNode.onCallConnected = { runOnUiThread { showInCallUi("Соединено"); startDurationTimer() } }
         meshNode.onCallEnded = { reason -> runOnUiThread { hideCallUi(reason) } }
         meshNode.onVoiceReceived = { seq, data -> pipeline?.onNetworkVoicePacket(seq, data) }
+        ChatActivity.setNode(meshNode)
+        meshNode.onTextReceived = { fromId, _, text -> runOnUiThread {
+            Toast.makeText(this, "💬 ${fromId.take(8)}: ${text.take(30)}", Toast.LENGTH_SHORT).show()
+        } }
+        meshNode.onFileOffer = { id, name, size, _ ->
+            kotlinx.coroutines.suspendCancellableCoroutine { cont ->
+                runOnUiThread {
+                    AlertDialog.Builder(this)
+                        .setTitle("📎 Входящий файл")
+                        .setMessage("$name (${size / 1024} КБ)\nОт: ${meshNode.currentPeerIp()}")
+                        .setCancelable(false)
+                        .setPositiveButton("Принять") { _, _ -> cont.resumeWith(Result.success(true)) }
+                        .setNegativeButton("Отклонить") { _, _ -> cont.resumeWith(Result.success(false)) }
+                        .show()
+                }
+            }
+        }
+        meshNode.onFileProgress = { _, name, sent, total, done, err -> runOnUiThread {
+            if (done) {
+                val msg = if (err != null) "❌ $name: $err" else "✅ $name получен"
+                Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
+            } else if (total > 0) {
+                val pct = (sent * 100 / total).toInt()
+                statusText.text = "📎 $name: $pct%"
+            }
+        } }
         meshNode.start()
     }
 
@@ -172,6 +198,19 @@ class MainActivity : AppCompatActivity() {
             peerList.addView(Button(this).apply {
                 text = "📞 Позвонить $peerIp"
                 setOnClickListener { callPeer(peerIp) }
+            })
+            peerList.addView(Button(this).apply {
+                text = "💬 Чат с ${peerIp}"
+                setOnClickListener {
+                    startActivity(Intent(this@MainActivity, ChatActivity::class.java).apply {
+                        putExtra(ChatActivity.EXTRA_PEER_ID, meshNode.currentPeerIp()?.let {
+                            // nodeId мы не знаем до HELLO, используем IP как ключ (для MVP)
+                            it
+                        })
+                        putExtra(ChatActivity.EXTRA_PEER_IP, peerIp)
+                        putExtra(ChatActivity.EXTRA_PEER_NAME, peerIp)
+                    })
+                }
             })
         } else {
             peerList.addView(TextView(this).apply {
