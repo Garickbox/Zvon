@@ -73,7 +73,8 @@ class MeshNode(
     }
 
     fun discover() = wifi.discover()
-    fun connectTo(device: WifiP2pDevice) = wifi.connect(device)
+    fun connectTo(device: WifiP2pDevice) = wifi.connectSafe(device)
+    fun forceReset() = wifi.forceReset()
     fun disconnect() = wifi.disconnect()
     fun currentPeerIp(): String? = peerIp
 

@@ -19,6 +19,7 @@ class AudioPlayback(
         private const val FRAME_NS = AudioConfig.FRAME_DURATION_MS * 1_000_000L
         private const val DRIFT_RESYNC_NS = 100_000_000L
         private const val JOIN_TIMEOUT_MS = 3_000L
+        private const val DRIFT_WARN_AFTER_FRAMES = 250L
     }
 
     private val running = AtomicBoolean(false)
@@ -31,6 +32,7 @@ class AudioPlayback(
     @Volatile var framesWritten = 0L; private set
     @Volatile var plcFramesWritten = 0L; private set
     @Volatile var underrunCount = 0L; private set
+    private var driftWarnCount = 0
 
     fun start() {
         if (!running.compareAndSet(false, true)) return
@@ -87,7 +89,10 @@ class AudioPlayback(
                 val sleepNs = nextDeadlineNs - now
                 if (sleepNs > 0) LockSupport.parkNanos(sleepNs)
                 else if (-sleepNs > DRIFT_RESYNC_NS) {
-                    logger.w("drift ${-sleepNs / 1_000_000}ms — resync")
+                    if (framesWritten > DRIFT_WARN_AFTER_FRAMES && driftWarnCount < 3) {
+                        logger.w("drift ${-sleepNs / 1_000_000}ms — resync (frame #$framesWritten)")
+                        driftWarnCount++
+                    }
                     nextDeadlineNs = now + FRAME_NS; continue
                 }
                 nextDeadlineNs += FRAME_NS

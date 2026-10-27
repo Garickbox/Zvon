@@ -39,6 +39,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnRaw: Button
     private lateinit var btnLoopback: Button
     private lateinit var btnShareLog: Button
+    private lateinit var btnForceReset: Button
     private lateinit var discoveryView: View
     private lateinit var callView: View
     private lateinit var callStatus: TextView
@@ -61,6 +62,7 @@ class MainActivity : AppCompatActivity() {
         btnRaw = findViewById(R.id.btnRaw)
         btnLoopback = findViewById(R.id.btnLoopback)
         btnShareLog = findViewById(R.id.btnShareLog)
+        btnForceReset = findViewById(R.id.btnForceReset)
         discoveryView = findViewById(R.id.discoveryView)
         callView = findViewById(R.id.callView)
         callStatus = findViewById(R.id.callStatus)
@@ -94,6 +96,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun wireUi() {
+        btnForceReset.setOnClickListener {
+            InAppLogger.write('I', "UI", "forceReset tapped")
+            statusText.text = "Force reset: cancel + remove group..."
+            peerList.removeAllViews()
+            meshNode.forceReset()
+        }
         btnDiscover.setOnClickListener {
             peerList.removeAllViews(); statusText.text = "Discovering..."; meshNode.discover()
         }
@@ -134,9 +142,22 @@ class MainActivity : AppCompatActivity() {
             })
             row.addView(Button(this).apply {
                 text = "Connect"
-                setOnClickListener {
-                    statusText.text = "Connecting to ${peer.address}..."
+                setOnClickListener { btn ->
+                    isEnabled = false
+                    text = "Connecting…"
+                    statusText.text = "Cleanup + connect to ${peer.address}…"
+                    InAppLogger.write('I', "UI", "connectSafe to ${peer.address}")
                     meshNode.connectTo(peer.raw)
+                    (btn as? Button)?.postDelayed({
+                        if (isEnabled.not()) {
+                            isEnabled = true
+                            text = "Connect"
+                            if (currentPeerIp == null) {
+                                statusText.text = "Connect timeout. Tap Force Reset, then retry (or toggle Wi-Fi on both phones)."
+                                InAppLogger.write('W', "UI", "connect timeout (20s)")
+                            }
+                        }
+                    }, 20_000)
                 }
             })
             peerList.addView(row)
