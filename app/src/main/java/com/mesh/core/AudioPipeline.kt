@@ -19,11 +19,6 @@ class AudioPipeline(
     private val loopbackSeq = AtomicLong(0)
 
     @Volatile var muted: Boolean = false
-    @Volatile var useOpusCodec: Boolean = true
-        set(value) {
-            field = value
-            OpusDecoderWrapper.useOpus = value
-        }
 
     private val voiceTransport: VoiceTransport? = if (mode == PipelineMode.NETWORK) {
         requireNotNull(voiceSender) { "voiceSender required for NETWORK" }
@@ -72,13 +67,6 @@ class AudioPipeline(
         scope.cancel()
     }
 
-    private fun ShortToBytes(pcm: ShortArray): ByteArray {
-        val out = ByteArray(pcm.size * 2)
-        val bb = java.nio.ByteBuffer.wrap(out).order(java.nio.ByteOrder.LITTLE_ENDIAN)
-        for (s in pcm) bb.putShort(s)
-        return out
-    }
-
     private fun onPcmFrame(pcm: ShortArray) {
         if (muted) {
             if (mode == PipelineMode.NETWORK) voiceTransport?.onSilence()
@@ -97,18 +85,10 @@ class AudioPipeline(
                 EncodeResult.Silence -> loopbackSeq.incrementAndGet()
                 EncodeResult.Error -> logger.e("encode error")
             }
-            PipelineMode.NETWORK -> {
-                if (!useOpusCodec) {
-                    // Raw: отправляем PCM напрямую через VoicePayload
-                    val bytes = ShortToBytes(pcm)
-                    voiceTransport?.onEncoded(bytes)
-                } else {
-                    when (val r = encoder.encode(pcm)) {
-                        is EncodeResult.Packet -> voiceTransport?.onEncoded(r.data)
-                        EncodeResult.Silence -> voiceTransport?.onSilence()
-                        EncodeResult.Error -> logger.e("encode error")
-                    }
-                }
+            PipelineMode.NETWORK -> when (val r = encoder.encode(pcm)) {
+                is EncodeResult.Packet -> voiceTransport?.onEncoded(r.data)
+                EncodeResult.Silence -> voiceTransport?.onSilence()
+                EncodeResult.Error -> logger.e("encode error")
             }
         }
     }

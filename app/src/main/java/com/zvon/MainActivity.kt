@@ -52,7 +52,6 @@ class MainActivity : AppCompatActivity() {
     @Volatile private var currentPeerIp: String? = null
     private var callStartMs = 0L
     private var durationJob: Job? = null
-    @Volatile private var useOpus = true
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -73,13 +72,6 @@ class MainActivity : AppCompatActivity() {
         btnMute = findViewById(R.id.btnMute)
         findViewById<Button>(R.id.btnHangup).setOnClickListener { meshNode.endCall() }
         btnMute.setOnClickListener { toggleMute() }
-        callStats.setOnLongClickListener {
-            useOpus = !useOpus
-            val mode = if (useOpus) "Opus" else "Raw"
-            Toast.makeText(this, "Кодек: $mode", Toast.LENGTH_SHORT).show()
-            InAppLogger.write('I', "UI", "codec switched to $mode")
-            true
-        }
         btnShareLog.setOnClickListener { shareLog() }
         InAppLogger.write('I', "UI", "MainActivity created")
         requestPerms()
@@ -239,8 +231,6 @@ class MainActivity : AppCompatActivity() {
             mode = PipelineMode.NETWORK,
             voiceSender = { seq, data, ip -> meshNode.sendVoice(seq, data, ip) }
         )
-        p.useOpusCodec = useOpus
-        InAppLogger.write('I', "Audio", "codec=${if (useOpus) "Opus" else "Raw"}")
         p.start(peerIp); pipeline = p
     }
 
