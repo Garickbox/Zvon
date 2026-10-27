@@ -29,9 +29,9 @@ class MainActivity : AppCompatActivity() {
     private lateinit var callView: View
     private lateinit var callStatus: TextView
     private lateinit var callPeer: TextView
-    private lateinit var btnHangup: Button
 
     private var isStopping = false
+    @Volatile private var currentPeerIp: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -46,38 +46,29 @@ class MainActivity : AppCompatActivity() {
         callView = findViewById(R.id.callView)
         callStatus = findViewById(R.id.callStatus)
         callPeer = findViewById(R.id.callPeer)
-        btnHangup = findViewById(R.id.btnHangup)
+
+        findViewById<Button>(R.id.btnHangup).setOnClickListener { meshNode.endCall() }
 
         requestPerms()
         setupMesh()
         wireUi()
     }
 
-    // ============================================================
-    // Mesh wiring
-    // ============================================================
-
     private fun setupMesh() {
         meshNode = MeshNode(this)
-
         meshNode.onPeersChanged = { peers -> runOnUiThread { renderPeers(peers) } }
         meshNode.onGroupFormed = { myIp, peerIp, isGo ->
-            runOnUiThread {
-                statusText.text = "Group formed. My IP=$myIp GO=$isGo peerIp=${peerIp ?: "?"}"
-                Toast.makeText(this, "Wi-Fi Direct connected", Toast.LENGTH_SHORT).show()
-            }
+            runOnUiThread { onGroupReady(myIp, peerIp, isGo) }
         }
         meshNode.onGroupLost = { runOnUiThread {
             statusText.text = "Group lost"
             peerList.removeAllViews()
+            currentPeerIp = null
         } }
         meshNode.onIncomingCall = { ip -> runOnUiThread { showIncomingDialog(ip) } }
-        meshNode.onCallConnected = { runOnUiThread { startInCallUi() } }
-        meshNode.onCallEnded = { runOnUiThread { stopInCall() } }
-        meshNode.onVoiceReceived = { seq, data ->
-            pipeline?.onNetworkVoicePacket(seq, data)
-        }
-
+        meshNode.onCallConnected = { runOnUiThread { showInCallUi("Connected") } }
+        meshNode.onCallEnded = { runOnUiThread { hideCallUi() } }
+        meshNode.onVoiceReceived = { seq, data -> pipeline?.onNetworkVoicePacket(seq, data) }
         meshNode.start()
     }
 
@@ -89,12 +80,7 @@ class MainActivity : AppCompatActivity() {
         }
         btnRaw.setOnClickListener { toggleLoopback(PipelineMode.RAW_CODEC) }
         btnLoopback.setOnClickListener { toggleLoopback(PipelineMode.FULL_LOOPBACK) }
-        btnHangup.setOnClickListener { meshNode.endCall() }
     }
-
-    // ============================================================
-    // Loopback (сохранено из предыдущей версии)
-    // ============================================================
 
     private fun toggleLoopback(mode: PipelineMode) {
         if (isStopping) return
@@ -116,58 +102,72 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // ============================================================
-    // Peer list
-    // ============================================================
-
     private fun renderPeers(peers: List<MeshNode.WifiP2pDeviceInfo>) {
         peerList.removeAllViews()
-        if (peers.isEmpty()) {
-            statusText.text = "No peers found"
-            return
-        }
+        if (peers.isEmpty()) { statusText.text = "No peers found"; return }
         statusText.text = "Found ${peers.size} peer(s)"
         peers.forEach { peer ->
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 setPadding(0, 8, 0, 8)
             }
-            val tv = TextView(this).apply {
+            row.addView(TextView(this).apply {
                 text = "${peer.name}\n${peer.address}"
-                setTextColor(0xFFFFFFFF.toInt())
-                textSize = 14f
+                setTextColor(0xFFFFFFFF.toInt()); textSize = 14f
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-            }
-            val connectBtn = Button(this).apply {
+            })
+            row.addView(Button(this).apply {
                 text = "Connect"
                 setOnClickListener {
                     statusText.text = "Connecting to ${peer.address}..."
                     meshNode.connectTo(peer.raw)
                 }
-            }
-            row.addView(tv)
-            row.addView(connectBtn)
+            })
             peerList.addView(row)
         }
     }
 
     // ============================================================
-    // Call UI
+    // Group ready — показываем Call если знаем peerIp
     // ============================================================
+    private fun onGroupReady(myIp: String, peerIp: String?, isGo: Boolean) {
+        statusText.text = "Group OK. my=$myIp peer=${peerIp ?: "?"} GO=$isGo"
+        Toast.makeText(this, "Wi-Fi Direct connected", Toast.LENGTH_SHORT).show()
+        currentPeerIp = peerIp ?: return
 
+        // Клиент звонит GO — у клиента peerIp всегда известен.
+        peerList.removeAllViews()
+        peerList.addView(Button(this).apply {
+            text = "📞 Call $peerIp"
+            setOnClickListener { callPeer(peerIp) }
+        })
+    }
+
+    // ============================================================
+    // Caller flow
+    // ============================================================
+    private fun callPeer(ip: String) {
+        if (pipeline != null) return
+        startNetworkPipeline(ip)
+        meshNode.call(ip)
+        showInCallUi("Calling…")
+    }
+
+    // ============================================================
+    // Callee flow
+    // ============================================================
     private fun showIncomingDialog(ip: String) {
         AlertDialog.Builder(this)
             .setTitle("Incoming call")
             .setMessage("From $ip")
             .setCancelable(false)
-            .setPositiveButton("Accept") { _, _ -> acceptCall(ip) }
+            .setPositiveButton("Accept") { _, _ ->
+                startNetworkPipeline(ip)
+                meshNode.acceptCall(ip)
+                showInCallUi("Connected")
+            }
             .setNegativeButton("Decline") { _, _ -> meshNode.declineCall(ip) }
             .show()
-    }
-
-    private fun acceptCall(ip: String) {
-        startNetworkPipeline(ip)
-        meshNode.acceptCall(ip)
     }
 
     private fun startNetworkPipeline(peerIp: String) {
@@ -179,37 +179,19 @@ class MainActivity : AppCompatActivity() {
         pipeline = p
     }
 
-    private fun startInCallUi() {
-        if (pipeline == null) {
-            // Мы инициатор — pipeline надо стартовать сейчас
-            val ip = meshNode.let { runCatching { null }.getOrNull() } ?: return
-            // peerIp узнаём через callback onGroupFormed ранее — берём из meshNode
-        }
+    private fun showInCallUi(status: String) {
         discoveryView.visibility = View.GONE
         callView.visibility = View.VISIBLE
-        callStatus.text = "In Call"
-        callPeer.text = "Audio streaming"
-        // Если pipeline ещё не создан (мы вызывающий — приняли ACCEPT):
-        if (pipeline == null) {
-            // Используем lastPeerIp из MeshNode через рефлексию? Нет — добавим метод.
-        }
+        callStatus.text = status
+        callPeer.text = currentPeerIp ?: "peer"
     }
 
-    private fun stopInCall() {
-        val p = pipeline
-        pipeline = null
+    private fun hideCallUi() {
         callView.visibility = View.GONE
         discoveryView.visibility = View.VISIBLE
-        callStatus.text = "In Call"
-        callPeer.text = ""
-        if (p != null) {
-            lifecycleScope.launch { p.stop() }
-        }
+        val p = pipeline; pipeline = null
+        if (p != null) lifecycleScope.launch { p.stop() }
     }
-
-    // ============================================================
-    // Permissions
-    // ============================================================
 
     private fun requestPerms() {
         val perms = mutableListOf(
