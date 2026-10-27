@@ -1,9 +1,57 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent" android:layout_height="match_parent"
-    android:orientation="vertical" android:gravity="center" android:padding="24dp" android:background="#0D0D0D">
-    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Zvon MVP" android:textColor="#FFFFFF" android:textSize="32sp" android:textStyle="bold" />
-    <TextView android:id="@+id/statusText" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="24dp" android:text="Idle" android:textColor="#888888" android:textSize="14sp" />
-    <Button android:id="@+id/btnLoopback" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="32dp" android:text="Start Loopback (FULL)" />
-    <Button android:id="@+id/btnRaw" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="12dp" android:text="Start Raw Codec Test" />
-</LinearLayout>
+    android:background="#0D0D0D">
+
+    <LinearLayout android:id="@+id/discoveryView"
+        android:layout_width="match_parent" android:layout_height="match_parent"
+        android:orientation="vertical" android:padding="16dp">
+
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:text="Zvon" android:textColor="#FFFFFF" android:textSize="28sp" android:textStyle="bold"/>
+
+        <TextView android:id="@+id/statusText" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:layout_marginTop="12dp"
+            android:text="Idle" android:textColor="#AAAAAA" android:textSize="13sp"/>
+
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:text="— Loopback —" android:textColor="#666666" android:textSize="12sp"
+            android:layout_marginTop="20dp"/>
+
+        <Button android:id="@+id/btnRaw" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:text="Raw Codec Test"/>
+
+        <Button android:id="@+id/btnLoopback" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:text="Full Loopback Test"/>
+
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:text="— Wi-Fi Direct —" android:textColor="#666666" android:textSize="12sp"
+            android:layout_marginTop="20dp"/>
+
+        <Button android:id="@+id/btnDiscover" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:text="Discover Peers"/>
+
+        <ScrollView android:layout_width="match_parent" android:layout_height="0dp"
+            android:layout_weight="1" android:layout_marginTop="8dp">
+            <LinearLayout android:id="@+id/peerList" android:layout_width="match_parent"
+                android:layout_height="wrap_content" android:orientation="vertical"/>
+        </ScrollView>
+    </LinearLayout>
+
+    <LinearLayout android:id="@+id/callView" android:visibility="gone"
+        android:layout_width="match_parent" android:layout_height="match_parent"
+        android:orientation="vertical" android:gravity="center" android:padding="24dp">
+
+        <TextView android:id="@+id/callStatus" android:layout_width="wrap_content"
+            android:layout_height="wrap_content" android:text="In Call" android:textColor="#FFFFFF"
+            android:textSize="26sp" android:textStyle="bold"/>
+
+        <TextView android:id="@+id/callPeer" android:layout_width="wrap_content"
+            android:layout_height="wrap_content" android:layout_marginTop="12dp"
+            android:text="" android:textColor="#AAAAAA" android:textSize="15sp"/>
+
+        <Button android:id="@+id/btnHangup" android:layout_width="200dp"
+            android:layout_height="wrap_content" android:layout_marginTop="40dp"
+            android:text="Hang Up"/>
+    </LinearLayout>
+</FrameLayout>

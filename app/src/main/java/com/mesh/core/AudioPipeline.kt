@@ -1,12 +1,14 @@
 package com.mesh.core
+
 import kotlinx.coroutines.*
 import java.util.concurrent.atomic.AtomicLong
 
-enum class PipelineMode { RAW_CODEC, FULL_LOOPBACK }
+enum class PipelineMode { RAW_CODEC, FULL_LOOPBACK, NETWORK }
 
 class AudioPipeline(
     private val mode: PipelineMode,
-    private val logger: MeshLogger = AndroidMeshLogger
+    private val logger: MeshLogger = AndroidMeshLogger,
+    voiceSender: (suspend (seq: Long, data: ByteArray, ip: String) -> Unit)? = null
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val encoder = OpusEncoderWrapper(logger)
@@ -16,17 +18,32 @@ class AudioPipeline(
     private lateinit var playback: AudioPlayback
     private val loopbackSeq = AtomicLong(0)
 
-    fun start() {
+    private val voiceTransport: VoiceTransport? = if (mode == PipelineMode.NETWORK) {
+        requireNotNull(voiceSender) { "voiceSender required for NETWORK" }
+        VoiceTransport(voiceSender, logger)
+    } else null
+
+    fun start(peerIp: String? = null) {
         playback = AudioPlayback(jitterBuffer, decoder, logger)
         if (mode == PipelineMode.RAW_CODEC) playback.isRawMode = true
         playback.start()
+
         capture = AudioCapture(
             onPcmFrameReady = ::onPcmFrame,
             audioSource = android.media.MediaRecorder.AudioSource.VOICE_COMMUNICATION,
             logger = logger
         )
         capture.start()
+
+        if (mode == PipelineMode.NETWORK && peerIp != null) {
+            voiceTransport?.startCall(peerIp)
+        }
         logger.d("AudioPipeline started (mode=$mode)")
+    }
+
+    /** Входящий голос из сети. */
+    fun onNetworkVoicePacket(seq: Long, opusData: ByteArray) {
+        jitterBuffer.receive(seq, opusData)
     }
 
     suspend fun stop() {
@@ -34,14 +51,15 @@ class AudioPipeline(
         playback.stop()
         logger.d(
             "Pipeline stopped: mode=$mode frames=${playback.framesWritten} " +
-            "playbackPlc=${playback.plcFramesWritten} underruns=${playback.underrunCount} " +
+            "plc=${playback.plcFramesWritten} underruns=${playback.underrunCount} " +
             "jitter=[${jitterBuffer.stats()}]"
         )
         if (playback.isThreadAlive()) {
-            logger.e("Skipping codec release to avoid UAF")
-            scope.cancel(); return
+            logger.e("Skipping codec release — playback thread leaked")
+            voiceTransport?.close(); scope.cancel(); return
         }
         encoder.release(); decoder.release()
+        voiceTransport?.close()
         scope.cancel()
     }
 
@@ -57,6 +75,11 @@ class AudioPipeline(
             PipelineMode.FULL_LOOPBACK -> when (val r = encoder.encode(pcm)) {
                 is EncodeResult.Packet -> jitterBuffer.receive(loopbackSeq.incrementAndGet(), r.data)
                 EncodeResult.Silence -> loopbackSeq.incrementAndGet()
+                EncodeResult.Error -> logger.e("encode error")
+            }
+            PipelineMode.NETWORK -> when (val r = encoder.encode(pcm)) {
+                is EncodeResult.Packet -> voiceTransport?.onEncoded(r.data)
+                EncodeResult.Silence -> voiceTransport?.onSilence()
                 EncodeResult.Error -> logger.e("encode error")
             }
         }
