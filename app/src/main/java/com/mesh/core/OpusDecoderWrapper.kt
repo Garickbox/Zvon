@@ -7,6 +7,9 @@ import java.nio.ByteOrder
 import java.util.concurrent.atomic.AtomicBoolean
 
 class OpusDecoderWrapper(private val logger: MeshLogger = AndroidMeshLogger) {
+    companion object {
+        @Volatile var useOpus: Boolean = true
+    }
     private val closed = AtomicBoolean(false)
     @Volatile private var codec: MediaCodec? = null
     @Volatile private var initialized = false
@@ -39,6 +42,7 @@ class OpusDecoderWrapper(private val logger: MeshLogger = AndroidMeshLogger) {
     fun decode(opusPacket: ByteArray): ShortArray? {
         if (closed.get()) return null
         if (opusPacket.isEmpty()) return null
+        if (!useOpus) return decodeRaw(opusPacket)
         if (!ensureInit()) return decodeRaw(opusPacket)
         val c = codec ?: return decodeRaw(opusPacket)
         return try {

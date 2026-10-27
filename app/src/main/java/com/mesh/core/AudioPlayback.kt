@@ -16,10 +16,8 @@ class AudioPlayback(
 ) {
     companion object {
         private const val JOIN_TIMEOUT_MS = 3_000L
-        // BATCH = 4 кадра = 80 мс за один write. Меньше вызовов write
-        // (12.5 Hz вместо 50 Hz) → amortize HAL overhead → правильные 50 fps.
-        private const val BATCH_FRAMES = 4
-        private const val TRACK_BUFFER_FRAMES = 6  // 120 мс внутри AudioTrack
+        private const val BATCH_FRAMES = 2
+        private const val TRACK_BUFFER_FRAMES = 4
     }
 
     private val running = AtomicBoolean(false)
@@ -70,8 +68,6 @@ class AudioPlayback(
             val batchBuffer = ShortArray(batchSize)
 
             while (running.get()) {
-                // Заполняем батч из 4 кадров
-                var anyData = false
                 for (i in 0 until BATCH_FRAMES) {
                     val pcm: ShortArray? = if (isRawMode) {
                         directQueue.poll()
@@ -80,14 +76,9 @@ class AudioPlayback(
                         if (opus != null) decoder.decode(opus) else null
                     }
                     val frame = pcm ?: ShortArray(AudioConfig.FRAME_SAMPLES)
-                    if (pcm != null) anyData = true
-                    else plcFramesWritten++
+                    if (pcm == null) plcFramesWritten++
                     System.arraycopy(frame, 0, batchBuffer, i * AudioConfig.FRAME_SAMPLES, AudioConfig.FRAME_SAMPLES)
                 }
-
-                // Один большой write — блокирует пока есть место в AudioTrack.
-                // В steady state AudioTrack буфер 120 мс, батч 80 мс →
-                // каждый write блокирует ~80 мс. Playback fps = 50 (правильно).
                 try {
                     val written = track.write(batchBuffer, 0, batchSize, AudioTrack.WRITE_BLOCKING)
                     if (written > 0) framesWritten += BATCH_FRAMES
@@ -104,6 +95,8 @@ class AudioPlayback(
         val minBuf = AudioTrack.getMinBufferSize(
             AudioConfig.SAMPLE_RATE, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT
         )
+        // USAGE_VOICE_COMMUNICATION + CONTENT_TYPE_SPEECH = звонковый маршрут.
+        // В паре с AudioManager.MODE_IN_COMMUNICATION + setSpeakerphoneOn(true) → громкая связь.
         val attrs = AudioAttributes.Builder()
             .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
             .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build()

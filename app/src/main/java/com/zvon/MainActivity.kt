@@ -52,6 +52,7 @@ class MainActivity : AppCompatActivity() {
     @Volatile private var currentPeerIp: String? = null
     private var callStartMs = 0L
     private var durationJob: Job? = null
+    @Volatile private var useOpus = true
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -72,6 +73,13 @@ class MainActivity : AppCompatActivity() {
         btnMute = findViewById(R.id.btnMute)
         findViewById<Button>(R.id.btnHangup).setOnClickListener { meshNode.endCall() }
         btnMute.setOnClickListener { toggleMute() }
+        callStats.setOnLongClickListener {
+            useOpus = !useOpus
+            val mode = if (useOpus) "Opus" else "Raw"
+            Toast.makeText(this, "Кодек: $mode", Toast.LENGTH_SHORT).show()
+            InAppLogger.write('I', "UI", "codec switched to $mode")
+            true
+        }
         btnShareLog.setOnClickListener { shareLog() }
         InAppLogger.write('I', "UI", "MainActivity created")
         requestPerms()
@@ -231,6 +239,8 @@ class MainActivity : AppCompatActivity() {
             mode = PipelineMode.NETWORK,
             voiceSender = { seq, data, ip -> meshNode.sendVoice(seq, data, ip) }
         )
+        p.useOpusCodec = useOpus
+        InAppLogger.write('I', "Audio", "codec=${if (useOpus) "Opus" else "Raw"}")
         p.start(peerIp); pipeline = p
     }
 
@@ -294,13 +304,23 @@ class MainActivity : AppCompatActivity() {
 
     private fun enterCallAudioMode() {
         try {
-            (getSystemService(Context.AUDIO_SERVICE) as AudioManager).mode = AudioManager.MODE_IN_COMMUNICATION
+            val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            am.mode = AudioManager.MODE_IN_COMMUNICATION
+            // Явно громкая связь, чтобы звук шёл в основной динамик, а не в earpiece
+            @Suppress("DEPRECATION")
+            am.isSpeakerphoneOn = true
+            val vol = am.getStreamMaxVolume(AudioManager.STREAM_VOICE_CALL)
+            am.setStreamVolume(AudioManager.STREAM_VOICE_CALL, vol, 0)
+            InAppLogger.write('I', "Audio", "mode=IN_COMMUNICATION speaker=ON vol=$vol")
         } catch (e: Exception) { InAppLogger.write('W', "Audio", "mode: ${e.message}") }
     }
 
     private fun exitCallAudioMode() {
         try {
-            (getSystemService(Context.AUDIO_SERVICE) as AudioManager).mode = AudioManager.MODE_NORMAL
+            val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            @Suppress("DEPRECATION")
+            am.isSpeakerphoneOn = false
+            am.mode = AudioManager.MODE_NORMAL
         } catch (_: Exception) { }
     }
 
