@@ -1,7 +1,7 @@
 package com.mesh.core
 
-import android.bluetooth.BluetoothDevice
 import android.content.Context
+import android.net.wifi.p2p.WifiP2pDevice
 import android.provider.Settings
 import kotlinx.coroutines.*
 import java.util.UUID
@@ -25,7 +25,6 @@ class MeshNode(
     @Volatile private var myIp: String? = null
     @Volatile private var callState = CallState.IDLE
 
-    // Callbacks для UI
     var onPeersChanged: ((List<WifiP2pDeviceInfo>) -> Unit)? = null
     var onGroupFormed: ((myIp: String, peerIp: String?, isGo: Boolean) -> Unit)? = null
     var onGroupLost: (() -> Unit)? = null
@@ -34,7 +33,7 @@ class MeshNode(
     var onCallEnded: (() -> Unit)? = null
     var onVoiceReceived: ((seq: Long, opusData: ByteArray) -> Unit)? = null
 
-    data class WifiP2pDeviceInfo(val name: String, val address: String, val raw: BluetoothDevice)
+    data class WifiP2pDeviceInfo(val name: String, val address: String, val raw: WifiP2pDevice)
 
     fun start() {
         wifi.onPeersChanged = { peers ->
@@ -47,12 +46,11 @@ class MeshNode(
             myIp = st.myIp
             peerIp = if (st.isGroupOwner) null else st.goIp
             udp.start(st.myIp)
-            // Клиент анонсирует себя GO через HELLO
             if (!st.isGroupOwner) {
                 scope.launch {
-                    delay(500)  // дать сокету встать
+                    delay(500)
                     sendPacket(PacketType.HELLO, st.goIp, ByteArray(0))
-                    logger.d("HELLO sent to GO $${st.goIp}")
+                    logger.d("HELLO sent to GO ${st.goIp}")
                 }
             }
             onGroupFormed?.invoke(st.myIp, peerIp, st.isGroupOwner)
@@ -66,12 +64,9 @@ class MeshNode(
     }
 
     fun discover() = wifi.discover()
-    fun connectTo(device: BluetoothDevice) = wifi.connect(device)
+    fun connectTo(device: WifiP2pDevice) = wifi.connect(device)
     fun disconnect() = wifi.disconnect()
-
-    // ============================================================
-    // Call control
-    // ============================================================
+    fun currentPeerIp(): String? = peerIp
 
     fun call(ip: String) {
         if (callState != CallState.IDLE) return
@@ -114,10 +109,6 @@ class MeshNode(
         }
     }
 
-    // ============================================================
-    // Packet I/O
-    // ============================================================
-
     private suspend fun sendPacket(type: PacketType, destIp: String, payload: ByteArray) {
         val pkt = MeshPacket(type, myId, MeshPacket.BROADCAST, System.nanoTime(), payload)
         udp.send(destIp, MeshPacket.encode(pkt))
@@ -157,9 +148,5 @@ class MeshNode(
         }
     }
 
-    fun close() {
-        wifi.stop()
-        udp.stop()
-        scope.cancel()
-    }
+    fun close() { wifi.stop(); udp.stop(); scope.cancel() }
 }

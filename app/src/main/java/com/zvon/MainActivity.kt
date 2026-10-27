@@ -36,7 +36,6 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
-
         statusText = findViewById(R.id.statusText)
         peerList = findViewById(R.id.peerList)
         btnDiscover = findViewById(R.id.btnDiscover)
@@ -46,9 +45,7 @@ class MainActivity : AppCompatActivity() {
         callView = findViewById(R.id.callView)
         callStatus = findViewById(R.id.callStatus)
         callPeer = findViewById(R.id.callPeer)
-
         findViewById<Button>(R.id.btnHangup).setOnClickListener { meshNode.endCall() }
-
         requestPerms()
         setupMesh()
         wireUi()
@@ -57,13 +54,9 @@ class MainActivity : AppCompatActivity() {
     private fun setupMesh() {
         meshNode = MeshNode(this)
         meshNode.onPeersChanged = { peers -> runOnUiThread { renderPeers(peers) } }
-        meshNode.onGroupFormed = { myIp, peerIp, isGo ->
-            runOnUiThread { onGroupReady(myIp, peerIp, isGo) }
-        }
+        meshNode.onGroupFormed = { myIp, peerIp, isGo -> runOnUiThread { onGroupReady(myIp, peerIp, isGo) } }
         meshNode.onGroupLost = { runOnUiThread {
-            statusText.text = "Group lost"
-            peerList.removeAllViews()
-            currentPeerIp = null
+            statusText.text = "Group lost"; peerList.removeAllViews(); currentPeerIp = null
         } }
         meshNode.onIncomingCall = { ip -> runOnUiThread { showIncomingDialog(ip) } }
         meshNode.onCallConnected = { runOnUiThread { showInCallUi("Connected") } }
@@ -74,9 +67,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun wireUi() {
         btnDiscover.setOnClickListener {
-            peerList.removeAllViews()
-            statusText.text = "Discovering..."
-            meshNode.discover()
+            peerList.removeAllViews(); statusText.text = "Discovering..."; meshNode.discover()
         }
         btnRaw.setOnClickListener { toggleLoopback(PipelineMode.RAW_CODEC) }
         btnLoopback.setOnClickListener { toggleLoopback(PipelineMode.FULL_LOOPBACK) }
@@ -86,8 +77,7 @@ class MainActivity : AppCompatActivity() {
         if (isStopping) return
         val p = pipeline
         if (p == null) {
-            pipeline = AudioPipeline(mode)
-            pipeline?.start()
+            pipeline = AudioPipeline(mode); pipeline?.start()
             statusText.text = "Running: $mode"
             btnRaw.isEnabled = false; btnLoopback.isEnabled = false
         } else {
@@ -96,8 +86,7 @@ class MainActivity : AppCompatActivity() {
             lifecycleScope.launch {
                 p.stop(); pipeline = null
                 statusText.text = "Stopped"
-                btnRaw.isEnabled = true; btnLoopback.isEnabled = true
-                isStopping = false
+                btnRaw.isEnabled = true; btnLoopback.isEnabled = true; isStopping = false
             }
         }
     }
@@ -108,8 +97,7 @@ class MainActivity : AppCompatActivity() {
         statusText.text = "Found ${peers.size} peer(s)"
         peers.forEach { peer ->
             val row = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                setPadding(0, 8, 0, 8)
+                orientation = LinearLayout.HORIZONTAL; setPadding(0, 8, 0, 8)
             }
             row.addView(TextView(this).apply {
                 text = "${peer.name}\n${peer.address}"
@@ -127,15 +115,10 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // ============================================================
-    // Group ready — показываем Call если знаем peerIp
-    // ============================================================
     private fun onGroupReady(myIp: String, peerIp: String?, isGo: Boolean) {
         statusText.text = "Group OK. my=$myIp peer=${peerIp ?: "?"} GO=$isGo"
         Toast.makeText(this, "Wi-Fi Direct connected", Toast.LENGTH_SHORT).show()
         currentPeerIp = peerIp ?: return
-
-        // Клиент звонит GO — у клиента peerIp всегда известен.
         peerList.removeAllViews()
         peerList.addView(Button(this).apply {
             text = "📞 Call $peerIp"
@@ -143,9 +126,6 @@ class MainActivity : AppCompatActivity() {
         })
     }
 
-    // ============================================================
-    // Caller flow
-    // ============================================================
     private fun callPeer(ip: String) {
         if (pipeline != null) return
         startNetworkPipeline(ip)
@@ -153,18 +133,13 @@ class MainActivity : AppCompatActivity() {
         showInCallUi("Calling…")
     }
 
-    // ============================================================
-    // Callee flow
-    // ============================================================
     private fun showIncomingDialog(ip: String) {
         AlertDialog.Builder(this)
             .setTitle("Incoming call")
             .setMessage("From $ip")
             .setCancelable(false)
             .setPositiveButton("Accept") { _, _ ->
-                startNetworkPipeline(ip)
-                meshNode.acceptCall(ip)
-                showInCallUi("Connected")
+                startNetworkPipeline(ip); meshNode.acceptCall(ip); showInCallUi("Connected")
             }
             .setNegativeButton("Decline") { _, _ -> meshNode.declineCall(ip) }
             .show()
@@ -175,15 +150,14 @@ class MainActivity : AppCompatActivity() {
             mode = PipelineMode.NETWORK,
             voiceSender = { seq, data, ip -> meshNode.sendVoice(seq, data, ip) }
         )
-        p.start(peerIp)
-        pipeline = p
+        p.start(peerIp); pipeline = p
     }
 
     private fun showInCallUi(status: String) {
         discoveryView.visibility = View.GONE
         callView.visibility = View.VISIBLE
         callStatus.text = status
-        callPeer.text = currentPeerIp ?: "peer"
+        callPeer.text = currentPeerIp ?: meshNode.currentPeerIp() ?: "peer"
     }
 
     private fun hideCallUi() {
@@ -194,10 +168,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun requestPerms() {
-        val perms = mutableListOf(
-            Manifest.permission.RECORD_AUDIO,
-            Manifest.permission.ACCESS_FINE_LOCATION
-        )
+        val perms = mutableListOf(Manifest.permission.RECORD_AUDIO, Manifest.permission.ACCESS_FINE_LOCATION)
         if (Build.VERSION.SDK_INT >= 31) {
             perms += Manifest.permission.BLUETOOTH_SCAN
             perms += Manifest.permission.BLUETOOTH_CONNECT
