@@ -117,10 +117,10 @@ class WifiDirectManager(
 
                 if (success) break
                 if (attempt < 3) {
-                    logger.d("connectSafe: retry in 5s")
-                    delay(5000)
+                    logger.d("connectSafe: retry (forceReset then wait 3s)")
                     try { manager?.cancelConnect(channel, null) } catch (_: Exception) { }
-                    delay(500)
+                    try { manager?.removeGroup(channel, null) } catch (_: Exception) { }
+                    delay(3000)
                 }
             }
             if (!success) logger.e("connectSafe: all attempts failed — Force Reset")

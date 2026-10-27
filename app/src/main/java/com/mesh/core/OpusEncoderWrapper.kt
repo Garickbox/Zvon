@@ -12,13 +12,6 @@ sealed class EncodeResult {
     object Error : EncodeResult()
 }
 
-/**
- * Opus encoder через MediaCodec. Нулевые внешние зависимости.
- *
- * Если MediaCodec "audio/opus" не поддерживается на устройстве (энкодер не в списке
- * codecs), происходит graceful fallback на raw PCM (совместимо с прошлой версией).
- * Logcat/InAppLogger покажет "using raw PCM fallback".
- */
 class OpusEncoderWrapper(private val logger: MeshLogger = AndroidMeshLogger) {
     private val closed = AtomicBoolean(false)
     @Volatile private var codec: MediaCodec? = null
@@ -32,23 +25,20 @@ class OpusEncoderWrapper(private val logger: MeshLogger = AndroidMeshLogger) {
         if (failed) return false
         if (closed.get()) return false
         return try {
-            val format = MediaFormat.createAudioFormat(
-                MIME, AudioConfig.SAMPLE_RATE, 1
-            ).apply {
+            val format = MediaFormat.createAudioFormat(MIME, AudioConfig.SAMPLE_RATE, 1).apply {
                 setInteger(MediaFormat.KEY_BIT_RATE, AudioConfig.BITRATE)
                 setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, AudioConfig.FRAME_SAMPLES * 2)
             }
             val c = MediaCodec.createEncoderByType(MIME)
             c.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
             c.start()
-            codec = c
-            initialized = true
+            codec = c; initialized = true
             warmup(c)
             logger.d("MediaCodec Opus encoder initialized")
             true
         } catch (e: Exception) {
             failed = true
-            logger.w("MediaCodec Opus encoder unavailable — using raw PCM fallback. ${e.message}")
+            logger.w("MediaCodec Opus encoder unavailable — raw PCM fallback. ${e.message}")
             false
         }
     }
@@ -67,9 +57,14 @@ class OpusEncoderWrapper(private val logger: MeshLogger = AndroidMeshLogger) {
         } catch (_: Exception) { }
     }
 
+    /**
+     * FIX: убрали ранний return Silence на нулевом PCM.
+     * Пусть MediaCodec сам решает (DTX внутри кодека → вернёт пустой пакет).
+     * Если кодек вернул пустой → Silence (не отправляем, seq не растёт).
+     * Если непустой (даже 1-2 байта) → Packet.
+     */
     fun encode(pcmFrame: ShortArray): EncodeResult {
         if (closed.get()) return EncodeResult.Error
-        if (pcmFrame.all { it == 0.toShort() }) return EncodeResult.Silence
         if (!ensureInit()) return encodeRaw(pcmFrame)
         val c = codec ?: return encodeRaw(pcmFrame)
         return try {
@@ -100,28 +95,21 @@ class OpusEncoderWrapper(private val logger: MeshLogger = AndroidMeshLogger) {
                 position(outInfo.offset); limit(outInfo.offset + outInfo.size); get(out)
             }
             c.releaseOutputBuffer(outIdx, false)
-
             if (out.isEmpty()) EncodeResult.Silence else EncodeResult.Packet(out)
         } catch (e: Exception) {
-            logger.e("encode failed", e)
-            EncodeResult.Error
+            logger.e("encode failed", e); EncodeResult.Error
         }
     }
 
-    private fun encodeRaw(pcmFrame: ShortArray): EncodeResult {
-        return try {
-            EncodeResult.Packet(shortArrayToBytes(pcmFrame))
-        } catch (e: Exception) {
-            logger.e("encodeRaw failed", e); EncodeResult.Error
-        }
-    }
+    private fun encodeRaw(pcmFrame: ShortArray): EncodeResult = try {
+        EncodeResult.Packet(shortArrayToBytes(pcmFrame))
+    } catch (e: Exception) { logger.e("encodeRaw failed", e); EncodeResult.Error }
 
     fun release() {
         if (!closed.compareAndSet(false, true)) return
         runCatching { codec?.stop() }
         runCatching { codec?.release() }
-        codec = null
-        initialized = false
+        codec = null; initialized = false
     }
 
     private fun shortArrayToBytes(arr: ShortArray): ByteArray {
@@ -131,7 +119,5 @@ class OpusEncoderWrapper(private val logger: MeshLogger = AndroidMeshLogger) {
         return out
     }
 
-    companion object {
-        const val MIME = "audio/opus"
-    }
+    companion object { const val MIME = "audio/opus" }
 }
