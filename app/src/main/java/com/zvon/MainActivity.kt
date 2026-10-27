@@ -88,12 +88,12 @@ class MainActivity : AppCompatActivity() {
         meshNode.onPeersChanged = { peers -> runOnUiThread { renderPeers(peers) } }
         meshNode.onGroupFormed = { myIp, peerIp, isGo -> runOnUiThread { onGroupReady(myIp, peerIp, isGo) } }
         meshNode.onGroupLost = { runOnUiThread {
-            statusText.text = "Group lost"
+            statusText.text = "Группа потеряна"
             peerList.removeAllViews()
             currentPeerIp = null
         } }
         meshNode.onIncomingCall = { ip -> runOnUiThread { showIncomingDialog(ip) } }
-        meshNode.onCallConnected = { runOnUiThread { showInCallUi("Connected"); startDurationTimer() } }
+        meshNode.onCallConnected = { runOnUiThread { showInCallUi("Соединено"); startDurationTimer() } }
         meshNode.onCallEnded = { reason -> runOnUiThread { hideCallUi(reason) } }
         meshNode.onVoiceReceived = { seq, data -> pipeline?.onNetworkVoicePacket(seq, data) }
         meshNode.start()
@@ -102,12 +102,12 @@ class MainActivity : AppCompatActivity() {
     private fun wireUi() {
         btnForceReset.setOnClickListener {
             InAppLogger.write('I', "UI", "forceReset")
-            statusText.text = "Force reset…"
+            statusText.text = "Сброс…"
             peerList.removeAllViews()
             meshNode.forceReset()
         }
         btnDiscover.setOnClickListener {
-            peerList.removeAllViews(); statusText.text = "Discovering..."; meshNode.discover()
+            peerList.removeAllViews(); statusText.text = "Поиск..."; meshNode.discover()
         }
         btnRaw.setOnClickListener { toggleLoopback(PipelineMode.RAW_CODEC) }
         btnLoopback.setOnClickListener { toggleLoopback(PipelineMode.FULL_LOOPBACK) }
@@ -118,14 +118,14 @@ class MainActivity : AppCompatActivity() {
         val p = pipeline
         if (p == null) {
             pipeline = AudioPipeline(mode); pipeline?.start()
-            statusText.text = "Running: $mode"
+            statusText.text = "Работает: $mode"
             btnRaw.isEnabled = false; btnLoopback.isEnabled = false
         } else {
             isStopping = true
             btnRaw.isEnabled = false; btnLoopback.isEnabled = false
             lifecycleScope.launch {
                 p.stop(); pipeline = null
-                statusText.text = "Stopped"
+                statusText.text = "Остановлено"
                 btnRaw.isEnabled = true; btnLoopback.isEnabled = true; isStopping = false
             }
         }
@@ -133,8 +133,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun renderPeers(peers: List<MeshNode.WifiP2pDeviceInfo>) {
         peerList.removeAllViews()
-        if (peers.isEmpty()) { statusText.text = "No peers"; return }
-        statusText.text = "Found ${peers.size} peer(s)"
+        if (peers.isEmpty()) { statusText.text = "Никого не найдено"; return }
+        statusText.text = "Найдено: ${peers.size}"
         peers.forEach { peer ->
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL; setPadding(0, 8, 0, 8)
@@ -145,18 +145,18 @@ class MainActivity : AppCompatActivity() {
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
             })
             row.addView(Button(this).apply {
-                text = "Connect"
+                text = "Подключить"
                 setOnClickListener { btn ->
                     isEnabled = false
-                    text = "Connecting…"
-                    statusText.text = "Connect to ${peer.address}…"
+                    text = "Подключение…"
+                    statusText.text = "Подключение к ${peer.address}…"
                     InAppLogger.write('I', "UI", "connect to ${peer.address}")
                     meshNode.connectTo(peer.raw)
                     (btn as Button).postDelayed({
                         if (!isEnabled) {
-                            isEnabled = true; text = "Connect"
+                            isEnabled = true; text = "Подключить"
                             if (currentPeerIp == null) {
-                                statusText.text = "Connect timeout. Force Reset + retry (or toggle Wi-Fi both)."
+                                statusText.text = "Таймаут. Нажмите «Сброс» и повторите (или передёрните Wi-Fi на обоих)."
                             }
                         }
                     }, 25_000)
@@ -168,18 +168,18 @@ class MainActivity : AppCompatActivity() {
 
     private fun onGroupReady(myIp: String, peerIp: String?, isGo: Boolean) {
         InAppLogger.write('I', "UI", "onGroupReady my=$myIp peer=$peerIp GO=$isGo")
-        statusText.text = "Group OK. my=$myIp peer=${peerIp ?: "?"} GO=$isGo"
-        Toast.makeText(this, "Wi-Fi Direct connected", Toast.LENGTH_SHORT).show()
+        statusText.text = "Группа OK. я=$myIp пир=${peerIp ?: "?"} GO=$isGo"
+        Toast.makeText(this, "Wi-Fi Direct подключён", Toast.LENGTH_SHORT).show()
         currentPeerIp = peerIp
         peerList.removeAllViews()
         if (peerIp != null) {
             peerList.addView(Button(this).apply {
-                text = "📞 Call $peerIp"
+                text = "📞 Позвонить $peerIp"
                 setOnClickListener { callPeer(peerIp) }
             })
         } else {
             peerList.addView(TextView(this).apply {
-                text = "Waiting for peer HELLO..."
+                text = "Ожидание партнёра..."
                 setTextColor(0xFFAAAAAA.toInt()); textSize = 13f
             })
         }
@@ -192,24 +192,24 @@ class MainActivity : AppCompatActivity() {
         startNetworkPipeline(ip)
         meshNode.call(ip)
         enterCallAudioMode()
-        showInCallUi("Calling…")
+        showInCallUi("Вызов…")
     }
 
     private fun showIncomingDialog(ip: String) {
         InAppLogger.write('I', "UI", "incoming from $ip")
         AlertDialog.Builder(this)
-            .setTitle("Incoming call")
-            .setMessage("From $ip")
+            .setTitle("Входящий звонок")
+            .setMessage("От $ip")
             .setCancelable(false)
-            .setPositiveButton("Accept") { _, _ ->
+            .setPositiveButton("Принять") { _, _ ->
                 currentPeerIp = ip
                 startNetworkPipeline(ip)
                 meshNode.acceptCall(ip)
                 enterCallAudioMode()
-                showInCallUi("Connected")
+                showInCallUi("Соединено")
                 startDurationTimer()
             }
-            .setNegativeButton("Decline") { _, _ -> meshNode.declineCall(ip) }
+            .setNegativeButton("Отклонить") { _, _ -> meshNode.declineCall(ip) }
             .show()
     }
 
@@ -227,7 +227,7 @@ class MainActivity : AppCompatActivity() {
         callView.visibility = View.VISIBLE
         callStatus.text = status
         callPeer.text = currentPeerIp ?: meshNode.currentPeerIp() ?: "peer"
-        btnMute.text = "Mute"
+        btnMute.text = "Без звука"
     }
 
     private fun hideCallUi(reason: String) {
@@ -244,23 +244,23 @@ class MainActivity : AppCompatActivity() {
         // Не теряем группу — если она всё ещё активна, предлагаем "Call again"
         if (meshNode.isInGroup()) {
             val peer = meshNode.currentPeerIp() ?: meshNode.lastKnownPeerIp()
-            statusText.text = "Group active ($reason). Peer=$peer"
+            statusText.text = "Группа активна ($reason). Пир=$peer"
             peerList.removeAllViews()
             if (peer != null) {
                 peerList.addView(Button(this).apply {
-                    text = "📞 Call again $peer"
+                    text = "📞 Позвонить снова $peer"
                     setOnClickListener { callPeer(peer) }
                 })
             }
         } else {
-            statusText.text = "Call ended ($reason). Group lost — Discover again."
+            statusText.text = "Звонок завершён ($reason). Группа потеряна — ищите заново."
         }
     }
 
     private fun toggleMute() {
         val p = pipeline ?: return
         p.muted = !p.muted
-        btnMute.text = if (p.muted) "Unmute" else "Mute"
+        btnMute.text = if (p.muted) "Включить микро" else "Без звука"
     }
 
     private fun startDurationTimer() {
@@ -298,18 +298,18 @@ class MainActivity : AppCompatActivity() {
     private fun shareLog() {
         InAppLogger.flush()
         val f = InAppLogger.currentFile()
-        if (f == null || !f.exists()) { Toast.makeText(this, "Log not ready", Toast.LENGTH_SHORT).show(); return }
+        if (f == null || !f.exists()) { Toast.makeText(this, "Лог не готов", Toast.LENGTH_SHORT).show(); return }
         try {
             val uri: Uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", f)
             val intent = Intent(Intent.ACTION_SEND).apply {
                 type = "text/plain"
                 putExtra(Intent.EXTRA_STREAM, uri)
-                putExtra(Intent.EXTRA_SUBJECT, "Zvon log")
+                putExtra(Intent.EXTRA_SUBJECT, "Лог Zvon")
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
-            startActivity(Intent.createChooser(intent, "Share log"))
+            startActivity(Intent.createChooser(intent, "Поделиться логом"))
         } catch (e: Exception) {
-            Toast.makeText(this, "Share failed: ${e.message}", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "Ошибка отправки: ${e.message}", Toast.LENGTH_LONG).show()
         }
     }
 

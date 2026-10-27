@@ -56,8 +56,8 @@ class MeshForegroundService : Service() {
     private fun createChannel() {
         if (Build.VERSION.SDK_INT >= 26) {
             val ch = NotificationChannel(
-                CHANNEL_ID, "Zvon Calls", NotificationManager.IMPORTANCE_LOW
-            ).apply { setShowBadge(false); description = "Active calls" }
+                CHANNEL_ID, "Звонки Zvon", NotificationManager.IMPORTANCE_LOW
+            ).apply { setShowBadge(false); description = "Активные звонки" }
             getSystemService(NotificationManager::class.java).createNotificationChannel(ch)
         }
     }
@@ -67,7 +67,7 @@ class MeshForegroundService : Service() {
             Notification.Builder(this, CHANNEL_ID)
         else Notification.Builder(this)
 
-        val text = if (currentPeer.isNotBlank()) "In call with $currentPeer" else "In call"
+        val text = if (currentPeer.isNotBlank()) "Звонок с $currentPeer" else "Идёт звонок"
         return builder
             .setContentTitle("Zvon")
             .setContentText(text)
