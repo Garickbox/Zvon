@@ -672,4 +672,22 @@ class MainActivity : AppCompatActivity() {
         pipeline?.let { p -> lifecycleScope.launch { p.stop() } }
         MeshForegroundService.stop(this); meshNode.close()
     }
+    private fun playRingtone() { /* рингтон играет только IncomingCallActivity */ }
+
+    private fun stopRingtone() { /* рингтон стопает только IncomingCallActivity */ }
+
+    private fun dismissRinging() { /* no-op */ }
+
+    private fun startNetworkPipeline(peerIp: String) {
+        MeshForegroundService.start(this, peerIp)
+        val p = com.mesh.core.AudioPipeline(
+            mode = com.mesh.core.PipelineMode.NETWORK,
+            voiceSender = { seq, data, ip -> meshNode.sendVoice(seq, data, ip) }
+        )
+        p.start(peerIp)
+        pipeline = p
+        ZvonController.pipeline = p
+    }
+
+
 }
