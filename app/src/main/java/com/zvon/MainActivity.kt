@@ -164,7 +164,6 @@ class MainActivity : AppCompatActivity() {
             }
         } }
         
-        ChatActivity.setNode(meshNode)
         meshNode.start()
         
         android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
