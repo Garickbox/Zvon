@@ -44,15 +44,34 @@ object NotificationHelper {
         val pi = PendingIntent.getActivity(context, fromId.hashCode(), intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
 
-        val notif = NotificationCompat.Builder(context, CHANNEL_MSG)
+        val builder = NotificationCompat.Builder(context, CHANNEL_MSG)
             .setSmallIcon(android.R.drawable.ic_dialog_email)
             .setContentTitle("Новое сообщение")
             .setContentText(text)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setContentIntent(pi)
             .setAutoCancel(true)
-            .build()
-        nm.notify(fromId.hashCode(), notif)
+
+        // Inline reply — только если peerIp известен
+        if (peerIp.isNotBlank()) {
+            val remoteInput = androidx.core.app.RemoteInput.Builder(ReplyReceiver.KEY_REPLY)
+                .setLabel("Ответить…")
+                .build()
+            val replyIntent = Intent(context, ReplyReceiver::class.java).apply {
+                putExtra(ReplyReceiver.EXTRA_PEER_ID, fromId)
+                putExtra(ReplyReceiver.EXTRA_PEER_IP, peerIp)
+            }
+            val replyPi = PendingIntent.getBroadcast(
+                context, fromId.hashCode() + 1, replyIntent,
+                PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            )
+            val action = NotificationCompat.Action.Builder(
+                android.R.drawable.ic_menu_send, "Ответить", replyPi
+            ).addRemoteInput(remoteInput).build()
+            builder.addAction(action)
+        }
+
+        nm.notify(fromId.hashCode(), builder.build())
     }
 
     /** FSI-уведомление входящего звонка. Full-screen intent открывает IncomingCallActivity. */

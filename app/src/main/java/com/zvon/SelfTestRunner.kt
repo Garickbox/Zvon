@@ -47,6 +47,7 @@ class SelfTestRunner(private val context: Context) {
         add(check("Логгер", ::checkLogger))
         add(check("Хранилище", ::checkStorage))
         add(check("MeshNode", ::checkMeshNode))
+        add(check("NotificationListener", ::checkNotificationListener))
         return results
     }
 
@@ -207,5 +208,10 @@ class SelfTestRunner(private val context: Context) {
         val id = m.myId.toString().take(8)
         val inGroup = m.isInGroup()
         return true to "id=$id, inGroup=$inGroup"
+    }
+
+    private fun checkNotificationListener(): Pair<Boolean, String> {
+        return if (ZvonNotificationListener.connected) true to "подключён (получено ${ZvonNotificationListener.receivedCount})"
+        else false to "не подключён — Настройки → Уведомления → Доступ к уведомлениям"
     }
 }

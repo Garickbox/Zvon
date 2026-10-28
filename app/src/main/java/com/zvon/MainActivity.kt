@@ -74,6 +74,9 @@ class MainActivity : AppCompatActivity() {
         findViewById<Button>(R.id.btnFiles).setOnClickListener {
             startActivity(Intent(this, FilesActivity::class.java))
         }
+        findViewById<Button>(R.id.btnNotifAccess).setOnClickListener {
+            showNotifAccessDialog()
+        }
         findViewById<Button>(R.id.btnPeerTest).setOnClickListener {
             ZvonController.peerTestRunner = com.mesh.core.PeerTestRunner(
                 meshNode

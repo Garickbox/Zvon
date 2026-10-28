@@ -77,5 +77,18 @@
             android:exported="false"
             android:parentActivityName=".MainActivity"
             android:theme="@style/Theme.Zvon" />
+            <service
+            android:name=".ZvonNotificationListener"
+            android:exported="false"
+            android:label="Zvon уведомления"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
+        <receiver
+            android:name=".ReplyReceiver"
+            android:exported="false" />
     </application>
 </manifest>
