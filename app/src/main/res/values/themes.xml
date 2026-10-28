@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.Zvon" parent="Theme.MaterialComponents.NoActionBar">
+        <item name="colorPrimary">@color/z_accent</item>
+        <item name="colorPrimaryVariant">@color/z_accent_dark</item>
+        <item name="colorSecondary">@color/z_accent</item>
+        <item name="android:colorBackground">@color/z_bg</item>
+        <item name="colorSurface">@color/z_surface</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:statusBarColor">@color/z_surface</item>
+        <item name="android:navigationBarColor">@color/z_bg</item>
+    </style>
+
+    <style name="Z_Button_Primary" parent="Widget.MaterialComponents.Button">
+        <item name="backgroundTint">@color/z_accent</item>
+        <item name="android:textColor">#FFFFFF</item>
+        <item name="cornerRadius">12dp</item>
+        <item name="android:textAllCaps">false</item>
+    </style>
+
+    <style name="Z_Button_Danger" parent="Widget.MaterialComponents.Button">
+        <item name="backgroundTint">@color/z_red</item>
+        <item name="android:textColor">#FFFFFF</item>
+        <item name="cornerRadius">12dp</item>
+        <item name="android:textAllCaps">false</item>
+    </style>
+
+    <style name="Z_Button_Success" parent="Widget.MaterialComponents.Button">
+        <item name="backgroundTint">@color/z_green</item>
+        <item name="android:textColor">#FFFFFF</item>
+        <item name="cornerRadius">12dp</item>
+        <item name="android:textAllCaps">false</item>
+    </style>
+</resources>

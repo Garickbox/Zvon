@@ -57,7 +57,21 @@ class ChatActivity : AppCompatActivity() {
         peerIp = intent.getStringExtra(EXTRA_PEER_IP) ?: ""
         peerName = intent.getStringExtra(EXTRA_PEER_NAME) ?: peerId.take(8)
 
-        setContentView(buildUi())
+        setContentView(R.layout.activity_chat)
+        scroll = findViewById(R.id.scroll)
+        messagesView = findViewById(R.id.messagesView)
+        input = findViewById(R.id.input)
+
+        findViewById<com.google.android.material.appbar.MaterialToolbar>(R.id.toolbar).apply {
+            title = "💬 $peerName"
+            setNavigationOnClickListener { finish() }
+        }
+        findViewById<com.google.android.material.button.MaterialButton>(R.id.btnAttach).setOnClickListener {
+            val i = Intent(Intent.ACTION_GET_CONTENT).apply { type = "*/*" }
+            filePicker.launch(i)
+        }
+        findViewById<com.google.android.material.button.MaterialButton>(R.id.btnSend).setOnClickListener { send() }
+
         reload()
 
         lifecycleScope.launch {
@@ -80,75 +94,6 @@ class ChatActivity : AppCompatActivity() {
         ZvonController.setActiveChat(null)
     }
 
-    private fun buildUi(): ViewGroup {
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setBackgroundColor(0xFF0D0D0D.toInt())
-        }
-
-        val header = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            setPadding(24, 32, 24, 16)
-            setBackgroundColor(0xFF1A1A1A.toInt())
-        }
-        header.addView(TextView(this).apply {
-            text = "💬 $peerName"
-            setTextColor(0xFFFFFFFF.toInt()); textSize = 18f
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-        })
-        header.addView(Button(this).apply {
-            text = "📞"
-            setOnClickListener {
-                if (peerIp.isBlank()) {
-                    Toast.makeText(this@ChatActivity, "Нет соединения", Toast.LENGTH_SHORT).show()
-                    return@setOnClickListener
-                }
-                ZvonController.meshNode?.call(peerIp)
-                startActivity(Intent(this@ChatActivity, MainActivity::class.java).apply {
-                    flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
-                })
-                finish()
-            }
-        })
-        header.addView(Button(this).apply {
-            text = "📎"
-            setOnClickListener {
-                val i = Intent(Intent.ACTION_GET_CONTENT).apply { type = "*/*" }
-                filePicker.launch(i)
-            }
-        })
-        root.addView(header)
-
-        scroll = ScrollView(this).apply {
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f)
-        }
-        messagesView = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(16, 8, 16, 8)
-        }
-        scroll.addView(messagesView)
-        root.addView(scroll)
-
-        val inputRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            setPadding(16, 8, 16, 16)
-        }
-        input = EditText(this).apply {
-            hint = "Сообщение…"; setTextColor(0xFFFFFFFF.toInt())
-            setHintTextColor(0xFF666666.toInt())
-            maxLines = 4
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-        }
-        inputRow.addView(input)
-        inputRow.addView(Button(this).apply {
-            text = "➤"
-            setOnClickListener { send() }
-        })
-        root.addView(inputRow)
-
-        return root
-    }
 
     private fun send() {
         val txt = input.text.toString().trim()

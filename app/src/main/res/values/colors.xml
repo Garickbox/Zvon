@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="z_bg">#0E1621</color>
+    <color name="z_surface">#17212B</color>
+    <color name="z_surface_alt">#1C2733</color>
+    <color name="z_divider">#101921</color>
+    <color name="z_accent">#5288C1</color>
+    <color name="z_accent_dark">#2B5278</color>
+    <color name="z_outgoing">#2B5278</color>
+    <color name="z_incoming">#182533</color>
+    <color name="z_text_primary">#E1E9F0</color>
+    <color name="z_text_secondary">#708499</color>
+    <color name="z_green">#4FCA52</color>
+    <color name="z_red">#E53935</color>
+    <color name="z_yellow">#F5B700</color>
+</resources>

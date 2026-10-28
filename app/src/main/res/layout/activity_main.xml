@@ -1,73 +1,94 @@
 <?xml version="1.0" encoding="utf-8"?>
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent" android:layout_height="match_parent"
-    android:background="#0D0D0D">
+    android:background="@color/z_bg">
 
     <LinearLayout android:id="@+id/discoveryView"
         android:layout_width="match_parent" android:layout_height="match_parent"
-        android:orientation="vertical" android:padding="16dp">
+        android:orientation="vertical">
 
-        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-            android:text="Zvon" android:textColor="#FFFFFF" android:textSize="28sp" android:textStyle="bold"/>
+        <com.google.android.material.appbar.MaterialToolbar
+            android:layout_width="match_parent" android:layout_height="?attr/actionBarSize"
+            android:background="@color/z_surface"
+            app:title="Zvon"
+            app:titleTextColor="@color/z_text_primary" />
 
-        <TextView android:id="@+id/statusText" android:layout_width="match_parent"
-            android:layout_height="wrap_content" android:layout_marginTop="8dp"
-            android:text="Готов" android:textColor="#AAAAAA" android:textSize="13sp"/>
+        <TextView android:id="@+id/statusText"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:padding="16dp" android:text="Готов"
+            android:textColor="@color/z_text_secondary" android:textSize="13sp"
+            android:background="@color/z_surface_alt" />
 
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:orientation="horizontal" android:layout_marginTop="12dp">
-            <Button android:id="@+id/btnDiscover" android:layout_width="0dp"
-                android:layout_weight="1" android:layout_height="wrap_content" android:text="Поиск"/>
-            <Button android:id="@+id/btnChats" android:layout_width="0dp"
-                android:layout_weight="1" android:layout_height="wrap_content"
-                android:layout_marginStart="8dp" android:text="Чаты"/>
-            <Button android:id="@+id/btnForceReset" android:layout_width="0dp"
-                android:layout_weight="1" android:layout_height="wrap_content"
-                android:layout_marginStart="8dp" android:text="Сброс"/>
+            android:orientation="horizontal" android:padding="12dp">
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnDiscover" style="@style/Z_Button_Primary"
+                android:layout_width="0dp" android:layout_weight="1"
+                android:layout_height="wrap_content" android:text="Поиск" />
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnChats" style="@style/Z_Button_Primary"
+                android:layout_width="0dp" android:layout_weight="1"
+                android:layout_marginStart="8dp" android:layout_height="wrap_content"
+                android:text="Чаты" />
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnForceReset" style="@style/Z_Button_Danger"
+                android:layout_width="0dp" android:layout_weight="1"
+                android:layout_marginStart="8dp" android:layout_height="wrap_content"
+                android:text="Сброс" />
         </LinearLayout>
 
         <ScrollView android:layout_width="match_parent" android:layout_height="0dp"
-            android:layout_weight="1" android:layout_marginTop="8dp">
+            android:layout_weight="1">
             <LinearLayout android:id="@+id/peerList" android:layout_width="match_parent"
-                android:layout_height="wrap_content" android:orientation="vertical"/>
+                android:layout_height="wrap_content" android:orientation="vertical"
+                android:padding="12dp" />
         </ScrollView>
 
-        <Button android:id="@+id/btnShareLog" android:layout_width="match_parent"
-            android:layout_height="wrap_content" android:layout_marginTop="8dp"
-            android:text="Поделиться логом"/>
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnShareLog" style="@style/Z_Button_Primary"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_margin="12dp" android:text="📤 Поделиться логом" />
     </LinearLayout>
 
     <LinearLayout android:id="@+id/callView" android:visibility="gone"
         android:layout_width="match_parent" android:layout_height="match_parent"
-        android:orientation="vertical" android:gravity="center" android:padding="24dp">
+        android:orientation="vertical" android:gravity="center"
+        android:background="@color/z_bg" android:padding="24dp">
 
         <TextView android:id="@+id/callStatus" android:layout_width="wrap_content"
-            android:layout_height="wrap_content" android:text="Звонок" android:textColor="#FFFFFF"
-            android:textSize="26sp" android:textStyle="bold"/>
+            android:layout_height="wrap_content" android:text="Звонок"
+            android:textColor="@color/z_text_primary" android:textSize="22sp"
+            android:textStyle="bold" />
         <TextView android:id="@+id/callPeer" android:layout_width="wrap_content"
             android:layout_height="wrap_content" android:layout_marginTop="8dp"
-            android:text="" android:textColor="#AAAAAA" android:textSize="14sp"/>
+            android:text="" android:textColor="@color/z_text_secondary" android:textSize="14sp" />
         <TextView android:id="@+id/callDuration" android:layout_width="wrap_content"
-            android:layout_height="wrap_content" android:layout_marginTop="16dp"
-            android:text="00:00" android:textColor="#FFFFFF" android:textSize="48sp"
-            android:fontFamily="monospace"/>
+            android:layout_height="wrap_content" android:layout_marginTop="24dp"
+            android:text="00:00" android:textColor="@color/z_text_primary"
+            android:textSize="48sp" android:fontFamily="monospace" />
         <TextView android:id="@+id/callStats" android:layout_width="wrap_content"
             android:layout_height="wrap_content" android:layout_marginTop="8dp"
-            android:text="" android:textColor="#666666" android:textSize="10sp"
-            android:fontFamily="monospace"/>
+            android:text="" android:textColor="@color/z_text_secondary"
+            android:textSize="10sp" android:fontFamily="monospace" />
 
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
             android:orientation="horizontal" android:layout_marginTop="40dp">
-            <Button android:id="@+id/btnMute" android:layout_width="0dp"
-                android:layout_weight="1" android:layout_height="wrap_content"
-                android:layout_marginEnd="6dp" android:text="Без звука"/>
-            <Button android:id="@+id/btnSpeaker" android:layout_width="0dp"
-                android:layout_weight="1" android:layout_height="wrap_content"
-                android:layout_marginStart="6dp" android:text="📞 Телефон"/>
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnMute" style="@style/Z_Button_Primary"
+                android:layout_width="0dp" android:layout_weight="1"
+                android:layout_height="wrap_content" android:layout_marginEnd="6dp"
+                android:text="🔇 Без звука" />
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnSpeaker" style="@style/Z_Button_Primary"
+                android:layout_width="0dp" android:layout_weight="1"
+                android:layout_height="wrap_content" android:layout_marginStart="6dp"
+                android:text="📞 Телефон" />
         </LinearLayout>
 
-        <Button android:id="@+id/btnHangup" android:layout_width="match_parent"
-            android:layout_height="wrap_content" android:layout_marginTop="8dp"
-            android:text="Завершить"/>
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnHangup" style="@style/Z_Button_Danger"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginTop="8dp" android:text="Завершить" />
     </LinearLayout>
 </FrameLayout>

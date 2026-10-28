@@ -44,6 +44,7 @@ class WifiDirectManager(
     @Volatile var autoConnect: Boolean = false
     @Volatile private var state: P2pState = P2pState.Idle
     @Volatile private var lastMac: String? = null
+    private var lastPeersCount = -1
     @Volatile private var connectedOnceAtLeast = false
 
     private val mutex = Mutex()
@@ -81,8 +82,17 @@ class WifiDirectManager(
         logger.d("[P2P] receiver registered")
     }
 
+    private fun p2pName(s: P2pState): String = when (s) {
+        is P2pState.Idle -> "Idle"
+        is P2pState.Discovering -> "Discovering"
+        is P2pState.Connecting -> "Connecting(${s.mac.takeLast(5)}, #${s.attempt})"
+        is P2pState.GroupFormed -> "GroupFormed(go=${s.isGroupOwner})"
+        is P2pState.Reconnecting -> "Reconnecting(#${s.attempt}, ${s.nextDelayMs}ms)"
+        is P2pState.Failed -> "Failed(${s.reason})"
+    }
     private fun setState(s: P2pState) {
-        state = s; logger.d("[P2P] state=$s"); onStateChanged?.invoke(s)
+        if (state::class == s::class && state.toString() == s.toString()) return
+        state = s; logger.d("[P2P] ${p2pName(s)}"); onStateChanged?.invoke(s)
     }
 
     @SuppressLint("MissingPermission")
@@ -118,7 +128,7 @@ class WifiDirectManager(
 
     private suspend fun refreshPeers() {
         val list = requestPeers()
-        logger.d("[P2P] peers=${list.size}")
+        if (list.size != lastPeersCount) { logger.d("[P2P] peers=${list.size}"); lastPeersCount = list.size }
         onPeersChanged?.invoke(list)
 
         if (!autoConnect || lastMac != null || state !is P2pState.Discovering) {
@@ -300,7 +310,7 @@ class WifiDirectManager(
         val info = requestConnectionInfo()
         val formed = info?.groupFormed == true
         val goIp = info?.groupOwnerAddress?.hostAddress
-        logger.d("[P2P] checkConnection formed=$formed goIp=$goIp state=$state")
+        if (formed) logger.d("[P2P] checkConnection formed goIp=$goIp")
         if (formed && goIp != null) {
             val myIp = waitForP2pIp()
             if (myIp != null) {

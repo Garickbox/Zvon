@@ -63,8 +63,7 @@ class MeshNode(
     fun start() {
         wifi.autoReconnectEnabled = true
         wifi.autoConnect = prefs.getBoolean("auto_connect", true)
-        wifi.onStateChanged = { st -> logger.d("[Mesh] p2p $st") }
-        wifi.onPeersChanged = { peers ->
+                wifi.onPeersChanged = { peers ->
             onPeersChanged?.invoke(peers.map { WifiP2pDeviceInfo(it.deviceName ?: it.deviceAddress, it.deviceAddress, it) })
         }
         wifi.onGroupFormed = { st ->
@@ -145,6 +144,8 @@ class MeshNode(
     }
 
     fun sendText(destNodeId: String, destIp: String, text: String) {
+        // chatStore.add — синхронно, чтобы UI сразу видел (Synchronized, быстрая операция)
+        val msg = chatStore.add(destNodeId, Message(0, destNodeId, true, "text", text, null, System.currentTimeMillis()))
         scope.launch {
             try {
                 val seq = System.nanoTime()
@@ -152,10 +153,9 @@ class MeshNode(
                 val pkt = MeshPacket.encode(MeshPacket(PacketType.TEXT, myId, MeshPacket.BROADCAST, seq, payload))
                 repeat(3) { i ->
                     udp.send(destIp, pkt)
-                    logger.d("[Mesh] TEXT tx#$i seq=$seq to $destIp (${payload.size}B)")
                     if (i < 2) delay(400)
                 }
-                chatStore.add(destNodeId, Message(0, destNodeId, true, "text", text, null, System.currentTimeMillis()))
+                logger.d("[Mesh] TEXT sent seq=$seq to $destIp (${payload.size}B)")
             } catch (e: Exception) {
                 logger.e("[Mesh] sendText failed", e)
             }
