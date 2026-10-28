@@ -235,19 +235,26 @@ class SelfTestRunner(private val context: Context) {
     private fun checkLanIp(): Pair<Boolean, String> {
         val node = ZvonController.meshNode ?: return false to "meshNode null"
         val mode = node.currentMode()
-        val lanIp = try {
-            for (intf in java.net.NetworkInterface.getNetworkInterfaces()) {
+        val lanIp = findLanIp()
+        return when {
+            lanIp != null -> true to "$lanIp (mode=$mode)"
+            mode == "P2P" -> true to "нет LAN IP, но режим P2P — ок"
+            else -> false to "нет LAN IP"
+        }
+    }
+
+    private fun findLanIp(): String? {
+        return try {
+            val ifaces = java.net.NetworkInterface.getNetworkInterfaces().toList()
+            for (intf in ifaces) {
                 if (!intf.isUp || intf.isLoopback) continue
                 if (!intf.name.startsWith("wlan")) continue
-                for (ia in intf.inetAddresses) {
-                    if (ia is java.net.Inet4Address && !ia.isLoopbackAddress) return@for_intf ia.hostAddress
+                for (ia in intf.inetAddresses.toList()) {
+                    if (ia is java.net.Inet4Address && !ia.isLoopbackAddress) return ia.hostAddress
                 }
             }
             null
         } catch (_: Exception) { null }
-        return if (lanIp != null) true to "$lanIp (mode=$mode)"
-        else if (mode == "P2P") true to "нет LAN IP, но режим P2P — ок"
-        else false to "нет LAN IP"
     }
 
 

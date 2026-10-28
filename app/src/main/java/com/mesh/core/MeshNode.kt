@@ -301,16 +301,21 @@ class MeshNode(
         }
         logger.d("[Mesh] LAN IP=$localIp, broadcasting...")
         lanDiscovery.onPeerFound = { peerId, peerLanIp ->
-            if (lanMode || myIp != null) return@onPeerFound  // уже подключились
-            val myLan = lanDiscovery.getLocalIp() ?: return@onPeerFound
-            logger.d("[Mesh] LAN peer found: $peerLanIp ($peerId)")
-            myIp = myLan
-            peerIp = peerLanIp
-            peerNodeId = peerId.toString()
-            lanMode = true
-            udp.start(myLan)
-            fileTransfer.startServer(myLan)
-            onGroupFormed?.invoke(myLan, peerLanIp, false)
+            if (!lanMode && myIp == null) {
+                val myLan = lanDiscovery.getLocalIp()
+                if (myLan != null) {
+                    logger.d("[Mesh] LAN peer found: $peerLanIp ($peerId)")
+                    myIp = myLan
+                    peerIp = peerLanIp
+                    peerNodeId = peerId.toString()
+                    lanMode = true
+                    udp.start(myLan)
+                    fileTransfer.startServer(myLan)
+                    onGroupFormed?.invoke(myLan, peerLanIp, false)
+                } else {
+                    logger.w("[Mesh] LAN peer found but no local IP")
+                }
+            }
         }
         lanDiscovery.start()
         lanDiscovery.discover()
