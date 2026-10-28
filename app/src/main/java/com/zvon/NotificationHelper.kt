@@ -29,6 +29,9 @@ object NotificationHelper {
 
     /** Тап по сообщению → открыть ChatActivity сразу с этим пиром. */
     fun showMessage(context: Context, fromId: String, text: String, peerIp: String) {
+        if (ZvonController.activeChatPeerId == fromId) {
+            return  // этот чат открыт на экране — уведомление не нужно
+        }
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         val intent = Intent(context, ChatActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP

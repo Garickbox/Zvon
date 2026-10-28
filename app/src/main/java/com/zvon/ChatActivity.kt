@@ -9,6 +9,11 @@ import android.view.ViewGroup
 import android.widget.*
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
+import kotlinx.coroutines.launch
+import com.mesh.core.CallState
 import androidx.lifecycle.lifecycleScope
 import com.mesh.core.Message
 import com.mesh.core.MeshNode
@@ -54,6 +59,26 @@ class ChatActivity : AppCompatActivity() {
 
         setContentView(buildUi())
         reload()
+
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                ZvonController.chatMessages.collect { msg ->
+                    if (msg.peerNodeId == peerId) reload()
+                }
+            }
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        val activeId = ZvonController.meshNode?.currentPeerId() ?: peerId
+        ZvonController.setActiveChat(activeId)
+        reload()
+    }
+
+    override fun onPause() {
+        super.onPause()
+        ZvonController.setActiveChat(null)
     }
 
     private fun buildUi(): ViewGroup {
@@ -75,6 +100,13 @@ class ChatActivity : AppCompatActivity() {
         header.addView(Button(this).apply {
             text = "📞"
             setOnClickListener {
+                if (peerIp.isBlank()) {
+                    Toast.makeText(this@ChatActivity, "Нет соединения", Toast.LENGTH_SHORT).show()
+                    return@setOnClickListener
+                }
+                if (ZvonController.state.value.callState == CallState.IDLE) {
+                    ZvonController.meshNode?.call(peerIp)
+                }
                 startActivity(Intent(this@ChatActivity, MainActivity::class.java).apply {
                     flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
                 })

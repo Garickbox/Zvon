@@ -1,6 +1,10 @@
 package com.zvon
 
+import com.mesh.core.Message
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 
 /**
  * Minimal bridge for file-transfer accept/decline.
@@ -19,6 +23,15 @@ object ZvonController {
     )
 
     @Volatile var meshNode: com.mesh.core.MeshNode? = null
+
+    /** Активный peerId открытого ChatActivity. Уведомления от него не показываем. */
+    @Volatile var activeChatPeerId: String? = null
+
+    private val _chatMessages = MutableSharedFlow<Message>(extraBufferCapacity = 64)
+    val chatMessages: SharedFlow<Message> = _chatMessages.asSharedFlow()
+    fun emitChatMessage(m: Message) { _chatMessages.tryEmit(m) }
+
+    fun setActiveChat(peerId: String?) { activeChatPeerId = peerId }
 
     @Volatile var pendingFileOffer: PendingFileOffer? = null
     @Volatile var onFileOfferChanged: ((PendingFileOffer?) -> Unit)? = null

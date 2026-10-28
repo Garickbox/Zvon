@@ -41,8 +41,10 @@ class WifiDirectManager(
     var onStateChanged: ((P2pState) -> Unit)? = null
 
     @Volatile var autoReconnectEnabled: Boolean = true
+    @Volatile var autoConnect: Boolean = false
     @Volatile private var state: P2pState = P2pState.Idle
     @Volatile private var lastMac: String? = null
+    @Volatile private var connectedOnceAtLeast = false
 
     private val mutex = Mutex()
     private var receiver: BroadcastReceiver? = null
@@ -109,6 +111,13 @@ class WifiDirectManager(
         val list = requestPeers()
         logger.d("[P2P] peers=${list.size}")
         onPeersChanged?.invoke(list)
+        if (autoConnect && lastMac == null && state is P2pState.Discovering && list.isNotEmpty()) {
+            val first = list.first()
+            logger.d("[P2P] auto-connect → ${first.deviceAddress}")
+            discoverJob?.cancel()
+            connectJob?.cancel()
+            connectJob = scope.launch { connectWithRetry(first.deviceAddress) }
+        }
     }
 
     @SuppressLint("MissingPermission")

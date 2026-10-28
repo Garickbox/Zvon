@@ -86,6 +86,13 @@ class MainActivity : AppCompatActivity() {
         btnSpeaker.setOnClickListener { toggleSpeaker() }
         btnShareLog.setOnClickListener { shareLog() }
         btnChats.setOnClickListener { toggleChatsView() }
+        btnChats.setOnLongClickListener {
+            val prefs = getSharedPreferences("zvon", MODE_PRIVATE)
+            val cur = prefs.getBoolean("auto_connect", true)
+            prefs.edit().putBoolean("auto_connect", !cur).apply()
+            Toast.makeText(this, "Автопоиск: ${if (!cur) "ВКЛ" else "ВЫКЛ"}", Toast.LENGTH_SHORT).show()
+            true
+        }
 
         requestPerms()
         requestFullScreenIntentPermission()
@@ -110,6 +117,7 @@ class MainActivity : AppCompatActivity() {
         meshNode.onContactsChanged = { runOnUiThread { if (showingChats) renderChats() } }
         
         meshNode.onTextReceived = { fromId, text -> runOnUiThread {
+            meshNode.chatStore.history(fromId).lastOrNull()?.let { ZvonController.emitChatMessage(it) }
             NotificationHelper.showMessage(this, fromId, text, meshNode.currentPeerIp() ?: "")
             if (showingChats) renderChats()
         } }
@@ -189,6 +197,39 @@ class MainActivity : AppCompatActivity() {
         btnDiscover.setOnClickListener { showingChats = false; peerList.removeAllViews(); statusText.text = "Поиск..."; meshNode.discover() }
     }
 
+
+
+
+    private fun autoDiscoverIfEnabled() {
+        val prefs = getSharedPreferences("zvon", MODE_PRIVATE)
+        if (!prefs.getBoolean("auto_connect", true)) return
+        if (ZvonController.state.value.peerIp != null) return
+        statusText.text = "Автопоиск…"
+        ZvonController.meshNode?.discover()
+    }
+
+    private fun renderConnectedPeer(peerIp: String, peerId: String?, isGo: Boolean) {
+        peerList.removeAllViews()
+        peerList.addView(TextView(this).apply {
+            text = "✅ Соединено\nя: ${ZvonController.state.value.myIp ?: "?"}\nпир: $peerIp\n${if (isGo) "(Group Owner)" else "(Client)"}"
+            setTextColor(0xFFAAAAAA.toInt()); textSize = 13f
+        })
+        peerList.addView(Button(this).apply {
+            text = "📞 Позвонить"
+            setOnClickListener {
+                ZvonController.meshNode?.call(peerIp)
+                startDurationTimer()  // визуально оживим
+            }
+        })
+        peerList.addView(Button(this).apply {
+            text = "💬 Чат"
+            setOnClickListener { openChat(peerId ?: peerIp, peerIp) }
+        })
+        peerList.addView(Button(this).apply {
+            text = "🔄 Переподключиться"
+            setOnClickListener { ZvonController.meshNode?.forceReset() }
+        })
+    }
 
     private fun renderPeers(peers: List<MeshNode.WifiP2pDeviceInfo>) {
         peerList.removeAllViews()
