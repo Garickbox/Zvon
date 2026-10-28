@@ -23,6 +23,7 @@ object ZvonController {
     )
 
     @Volatile var meshNode: com.mesh.core.MeshNode? = null
+    @Volatile var peerTestRunner: com.mesh.core.PeerTestRunner? = null
 
     /** Активный peerId открытого ChatActivity. Уведомления от него не показываем. */
     @Volatile var activeChatPeerId: String? = null

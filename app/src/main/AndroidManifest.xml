@@ -26,6 +26,8 @@
         android:name=".ZvonApp"
         android:allowBackup="true"
         android:label="Zvon"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.Zvon">
 
@@ -67,6 +69,11 @@
             android:theme="@style/Theme.Zvon" />
             <activity
             android:name=".SelfTestActivity"
+            android:exported="false"
+            android:parentActivityName=".MainActivity"
+            android:theme="@style/Theme.Zvon" />
+            <activity
+            android:name=".PeerTestActivity"
             android:exported="false"
             android:parentActivityName=".MainActivity"
             android:theme="@style/Theme.Zvon" />

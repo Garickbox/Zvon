@@ -10,7 +10,8 @@ enum class PacketType(val id: Byte) {
     TEXT(0x08),
     FILE_OFFER(0x09),
     FILE_ACCEPT(0x0A),
-    FILE_DECLINE(0x0B);
+    FILE_DECLINE(0x0B),
+    TEST(0x20);
 
     companion object {
         fun fromId(id: Byte) = values().firstOrNull { it.id == id }

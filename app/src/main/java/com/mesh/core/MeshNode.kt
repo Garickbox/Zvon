@@ -57,6 +57,7 @@ class MeshNode(
     var onFileOffer: (suspend (id: String, name: String, size: Long, ip: String) -> Boolean)? = null
     var onFileProgress: ((id: String, name: String, sent: Long, total: Long, done: Boolean, err: String?) -> Unit)? = null
     var onContactsChanged: (() -> Unit)? = null
+    var onTestPacket: ((fromIp: String, payload: String) -> Unit)? = null
 
     data class WifiP2pDeviceInfo(val name: String, val address: String, val raw: WifiP2pDevice)
 
@@ -167,6 +168,10 @@ class MeshNode(
         chatStore.add(destNodeId, Message(0, destNodeId, true, "file", uri.lastPathSegment ?: "file", null, System.currentTimeMillis()))
     }
 
+    fun sendTestPacket(destIp: String, payload: String) {
+        scope.launch { sendPacket(PacketType.TEST, destIp, payload.toByteArray(Charsets.UTF_8)) }
+    }
+
     fun sendVoice(seq: Long, opusData: ByteArray, destIp: String) {
         scope.launch { sendPacket(PacketType.VOICE, destIp, VoicePayload(seq, opusData).encode()) }
     }
@@ -244,6 +249,10 @@ class MeshNode(
             PacketType.CALL_ACCEPT -> { if (callState == CallState.CALLING) { callState = CallState.IN_CALL; startCallLoops(); onCallConnected?.invoke() } }
             PacketType.CALL_BYE -> { if (callState != CallState.IDLE) { callState = CallState.IDLE; stopCallLoops(); onCallEnded?.invoke("peer hung up") } }
             PacketType.VOICE -> { if (callState == CallState.IN_CALL) { VoicePayload.decode(pkt.payload)?.let { onVoiceReceived?.invoke(it.seq, it.opusData) } } }
+            PacketType.TEST -> {
+                syncIp()
+                try { onTestPacket?.invoke(fromIp, String(pkt.payload, Charsets.UTF_8)) } catch (_: Exception) {}
+            }
             PacketType.TEXT -> {
                 syncIp()
                 TextPayload.decode(pkt.payload)?.let {

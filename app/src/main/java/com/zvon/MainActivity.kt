@@ -74,6 +74,12 @@ class MainActivity : AppCompatActivity() {
         findViewById<Button>(R.id.btnFiles).setOnClickListener {
             startActivity(Intent(this, FilesActivity::class.java))
         }
+        findViewById<Button>(R.id.btnPeerTest).setOnClickListener {
+            ZvonController.peerTestRunner = com.mesh.core.PeerTestRunner(
+                meshNode
+            ) { msg -> InAppLogger.write('I', "PeerTest", msg) }
+            startActivity(Intent(this, PeerTestActivity::class.java))
+        }
         findViewById<Button>(R.id.btnSelfTest).setOnClickListener {
             startActivity(Intent(this, SelfTestActivity::class.java))
         }
@@ -134,6 +140,7 @@ class MainActivity : AppCompatActivity() {
         meshNode.onCallEnded = { reason -> runOnUiThread { dismissRinging(); hideCallUi(reason) } }
         meshNode.onVoiceReceived = { seq, data -> pipeline?.onNetworkVoicePacket(seq, data) }
         meshNode.onContactsChanged = { runOnUiThread { if (showingChats) renderChats() } }
+        meshNode.onTestPacket = { fromIp, payload -> ZvonController.peerTestRunner?.onIncoming(fromIp, payload) }
         
         meshNode.onTextReceived = { fromId, text -> runOnUiThread {
             meshNode.chatStore.history(fromId).lastOrNull()?.let { ZvonController.emitChatMessage(it) }
