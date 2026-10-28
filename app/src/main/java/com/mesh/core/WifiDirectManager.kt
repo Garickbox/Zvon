@@ -107,17 +107,33 @@ class WifiDirectManager(
     }
 
     @SuppressLint("MissingPermission")
+    @Volatile private var pendingAutoConnectMac: String? = null
+    @Volatile private var pendingAutoConnectSince: Long = 0L
+
     private suspend fun refreshPeers() {
         val list = requestPeers()
         logger.d("[P2P] peers=${list.size}")
         onPeersChanged?.invoke(list)
-        if (autoConnect && lastMac == null && state is P2pState.Discovering && list.isNotEmpty()) {
-            val first = list.first()
-            logger.d("[P2P] auto-connect → ${first.deviceAddress}")
-            discoverJob?.cancel()
-            connectJob?.cancel()
-            connectJob = scope.launch { connectWithRetry(first.deviceAddress) }
+
+        if (!autoConnect || lastMac != null || state !is P2pState.Discovering) {
+            pendingAutoConnectMac = null
+            return
         }
+        if (list.isEmpty()) { pendingAutoConnectMac = null; return }
+
+        val candidate = list.first().deviceAddress
+        val now = System.currentTimeMillis()
+        if (pendingAutoConnectMac != candidate) {
+            pendingAutoConnectMac = candidate
+            pendingAutoConnectSince = now
+            return
+        }
+        if (now - pendingAutoConnectSince < 2000) return  // ждём 2 сек стабильности
+        logger.d("[P2P] auto-connect (stable 2s) → $candidate")
+        pendingAutoConnectMac = null
+        discoverJob?.cancel()
+        connectJob?.cancel()
+        connectJob = scope.launch { connectWithRetry(candidate) }
     }
 
     @SuppressLint("MissingPermission")
@@ -176,23 +192,28 @@ class WifiDirectManager(
                 }
 
                 // --- b) Пробуем connect ---
-                val result = tryConnect(mac, 25_000)
+                val result = tryConnect(mac, 20_000)
                 when (result) {
                     ConnectResult.SUCCESS -> { logger.d("[P2P] connected on attempt $attempt"); return@withLock }
-                    ConnectResult.BUSY -> { logger.w("[P2P] BUSY, wait 10s"); delay(10_000) }
+                    ConnectResult.BUSY -> {
+                        logger.w("[P2P] BUSY, wait 5s")
+                        delay(5000)
+                    }
                     ConnectResult.ERROR -> {
+                        // onFailure — система не дала даже попытку. peer list ещё тёплый.
                         consecutiveFails++
-                        logger.w("[P2P] ERROR on attempt $attempt (consecutive=$consecutiveFails)")
-                        if (consecutiveFails >= 2) { forceResetInternal(); consecutiveFails = 0; delay(2000) }
-                        else delay(3000)
+                        logger.w("[P2P] ERROR attempt=$attempt consecutive=$consecutiveFails")
+                        if (consecutiveFails >= 3) { forceResetInternal(); consecutiveFails = 0; delay(3000) }
+                        else delay(1500)
                     }
                     ConnectResult.TIMEOUT -> {
+                        // onSuccess был, но группа не сформировалась за 20с — реально залипло.
                         lastErr = "attempt $attempt timeout"
-                        logger.w("[P2P] attempt $attempt timeout (25s), cancel")
+                        logger.w("[P2P] TIMEOUT attempt=$attempt → cancelConnect")
                         cancelConnectInternal()
                         consecutiveFails++
-                        if (consecutiveFails >= 2) { forceResetInternal(); consecutiveFails = 0; delay(2000) }
-                        else delay(2000)
+                        if (consecutiveFails >= 2) { forceResetInternal(); consecutiveFails = 0; delay(3000) }
+                        else delay(1500)
                     }
                 }
             }
@@ -207,9 +228,13 @@ class WifiDirectManager(
         connectDeferred = deferred
         val config = WifiP2pConfig().apply { deviceAddress = mac; groupOwnerIntent = 0 }
         var failReason = -1
+        val t0 = System.currentTimeMillis()
         val initiated = suspendCancellableCoroutine<Boolean> { cont ->
             manager?.connect(channel, config, object : WifiP2pManager.ActionListener {
-                override fun onSuccess() { if (cont.isActive) cont.resume(true) }
+                override fun onSuccess() {
+                    logger.d("[P2P] connect onSuccess (initiated)")
+                    if (cont.isActive) cont.resume(true)
+                }
                 override fun onFailure(reason: Int) {
                     failReason = reason
                     logger.w("[P2P] connect onFailure reason=$reason")
@@ -222,12 +247,29 @@ class WifiDirectManager(
             return when (failReason) {
                 WifiP2pManager.BUSY -> ConnectResult.BUSY
                 WifiP2pManager.ERROR -> ConnectResult.ERROR
-                else -> ConnectResult.ERROR  // P2P_UNSUPPORTED / NO_SERVICE
+                else -> ConnectResult.ERROR
             }
         }
-        val ok = withTimeoutOrNull(timeoutMs) { deferred.await() } ?: false
+        // Poll: broadcast может потеряться, опрашиваем requestConnectionInfo раз в секунду
+        val deadline = t0 + timeoutMs
+        while (System.currentTimeMillis() < deadline) {
+            if (deferred.isCompleted) {
+                val ok = deferred.getCompleted()
+                connectDeferred = null
+                logger.d("[P2P] connect done in ${System.currentTimeMillis() - t0}ms ok=$ok")
+                return if (ok) ConnectResult.SUCCESS else ConnectResult.ERROR
+            }
+            delay(1000)
+            if (deferred.isCompleted) continue
+            val info = requestConnectionInfo()
+            if (info?.groupFormed == true) {
+                // Дадим broadcast-хендлеру обработать state, но сигнал успеха уже есть
+                deferred.complete(true)
+            }
+        }
         connectDeferred = null
-        return if (ok) ConnectResult.SUCCESS else ConnectResult.TIMEOUT
+        logger.w("[P2P] connect REAL timeout after ${System.currentTimeMillis() - t0}ms")
+        return ConnectResult.TIMEOUT
     }
 
     private fun cancelConnectInternal() { try { manager?.cancelConnect(channel, null) } catch (_: Exception) {}; connectDeferred = null }
@@ -238,7 +280,11 @@ class WifiDirectManager(
         connectDeferred = null
     }
 
+    @Volatile private var lastForceResetAt = 0L
     fun forceReset() {
+        val now = System.currentTimeMillis()
+        if (now - lastForceResetAt < 3000) { logger.d("[P2P] forceReset debounced"); return }
+        lastForceResetAt = now
         reconnectJob?.cancel(); connectJob?.cancel()
         scope.launch { mutex.withLock { forceResetInternal(); setState(P2pState.Idle); onGroupLost?.invoke() } }
     }
@@ -246,22 +292,31 @@ class WifiDirectManager(
     @SuppressLint("MissingPermission")
     private suspend fun checkConnection() {
         val info = requestConnectionInfo()
-        if (info?.groupFormed == true) {
-            val goIp = info.groupOwnerAddress?.hostAddress
-            if (goIp != null) {
-                val myIp = waitForP2pIp()
-                if (myIp != null) {
-                    setState(P2pState.GroupFormed(myIp, goIp, info.isGroupOwner))
-                    onGroupFormed?.invoke(GroupState(myIp, goIp, info.isGroupOwner))
-                    connectDeferred?.complete(true); return
+        val formed = info?.groupFormed == true
+        val goIp = info?.groupOwnerAddress?.hostAddress
+        logger.d("[P2P] checkConnection formed=$formed goIp=$goIp state=$state")
+        if (formed && goIp != null) {
+            val myIp = waitForP2pIp()
+            if (myIp != null) {
+                val isGo = info.isGroupOwner
+                val cur = state
+                if (cur !is P2pState.GroupFormed || cur.myIp != myIp) {
+                    setState(P2pState.GroupFormed(myIp, goIp, isGo))
+                    onGroupFormed?.invoke(GroupState(myIp, goIp, isGo))
                 }
+                connectDeferred?.complete(true)  // ТОЛЬКО true
+            } else {
+                logger.w("[P2P] group formed but no p2p IP yet")
             }
-            logger.w("[P2P] group formed but no p2p IP yet")
         } else {
+            // ВАЖНО: НЕ комплитим deferred(false). "Not formed" в момент CONNECTING —
+            // это норма. Реальные фейлы приходят через onFailure или 25-сек timeout.
             if (state is P2pState.GroupFormed) {
-                logger.w("[P2P] group lost"); setState(P2pState.Idle); onGroupLost?.invoke(); scheduleAutoReconnect()
+                logger.w("[P2P] group lost")
+                setState(P2pState.Idle)
+                onGroupLost?.invoke()
+                scheduleAutoReconnect()
             }
-            connectDeferred?.complete(false)
         }
     }
 
