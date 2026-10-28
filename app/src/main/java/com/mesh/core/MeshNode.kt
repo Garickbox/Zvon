@@ -309,6 +309,7 @@ class MeshNode(
                 chatStore.add(fromNode, Message(0, fromNode, false, "text", tp.text, null, System.currentTimeMillis()))
                 onTextReceived?.invoke(fromNode, fromIp, tp.text)
             }
+            else -> { }
         }
     }
 
