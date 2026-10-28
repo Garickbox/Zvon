@@ -288,7 +288,7 @@ class MeshNode(
                 if (callState != CallState.IDLE) {
                     callState = CallState.IDLE
                     stopCallLoops()
-                    stopOwnedPipeline("peer hung up") }
+                    stopOwnedPipeline("peer hung up")
                     onCallEnded?.invoke("peer hung up")
                 }
             }
