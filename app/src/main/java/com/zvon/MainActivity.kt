@@ -98,6 +98,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupMesh() {
         meshNode = MeshNode(this)
+        ZvonController.meshNode = meshNode
         meshNode.onPeersChanged = { peers -> runOnUiThread { if (!showingChats) renderPeers(peers) } }
         meshNode.onGroupFormed = { myIp, peerIp, isGo -> runOnUiThread { onGroupReady(myIp, peerIp, isGo) } }
         meshNode.onGroupLost = { runOnUiThread { statusText.text = "Группа потеряна"; if (showingChats) renderChats() } }
@@ -108,7 +109,7 @@ class MainActivity : AppCompatActivity() {
         meshNode.onContactsChanged = { runOnUiThread { if (showingChats) renderChats() } }
         
         meshNode.onTextReceived = { fromId, text -> runOnUiThread {
-            NotificationHelper.showMessage(this, fromId, text)
+            NotificationHelper.showMessage(this, fromId, text, meshNode.currentPeerIp() ?: "")
             if (showingChats) renderChats()
         } }
         

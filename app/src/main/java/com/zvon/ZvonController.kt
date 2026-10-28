@@ -18,6 +18,8 @@ object ZvonController {
         val decision: CompletableDeferred<Boolean>
     )
 
+    @Volatile var meshNode: com.mesh.core.MeshNode? = null
+
     @Volatile var pendingFileOffer: PendingFileOffer? = null
     @Volatile var onFileOfferChanged: ((PendingFileOffer?) -> Unit)? = null
     @Volatile var onFileOfferProgress: ((name: String, sent: Long, total: Long, done: Boolean, err: String?) -> Unit)? = null

@@ -28,10 +28,10 @@ class IncomingCallActivity : AppCompatActivity() {
         ip = intent.getStringExtra(EXTRA_IP) ?: run { finish(); return }
         setContentView(R.layout.activity_incoming_call)
         findViewById<TextView>(R.id.callerIp).text = ip
-        findViewById<Button>(R.id.btnAccept).setOnClickListener { MeshForegroundService.accept(this, ip); finish() }
-        findViewById<Button>(R.id.btnDecline).setOnClickListener { MeshForegroundService.decline(this, ip); finish() }
+        findViewById<Button>(R.id.btnAccept).setOnClickListener { ZvonController.meshNode?.acceptCall(ip); finish() }
+        findViewById<Button>(R.id.btnDecline).setOnClickListener { ZvonController.meshNode?.declineCall(ip); finish() }
         Handler(Looper.getMainLooper()).postDelayed({
-            if (!isFinishing) { MeshForegroundService.decline(this, ip); finish() }
+            if (!isFinishing) { ZvonController.meshNode?.declineCall(ip); finish() }
         }, 60_000)
     }
 
