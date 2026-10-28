@@ -2,21 +2,23 @@ package com.zvon
 
 import android.app.Activity
 import android.content.Intent
-import android.net.Uri
 import android.os.Bundle
 import android.view.Gravity
 import android.view.ViewGroup
-import android.widget.*
+import android.widget.EditText
+import android.widget.LinearLayout
+import android.widget.ScrollView
+import android.widget.TextView
+import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
-import kotlinx.coroutines.launch
-import com.mesh.core.CallState
-import androidx.lifecycle.lifecycleScope
+import com.google.android.material.appbar.MaterialToolbar
+import com.google.android.material.button.MaterialButton
+import com.google.android.material.card.MaterialCardView
 import com.mesh.core.Message
-import com.mesh.core.MeshNode
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
@@ -24,14 +26,11 @@ import java.util.*
 class ChatActivity : AppCompatActivity() {
 
     companion object {
-        private var currentNode: MeshNode? = null
-        fun setNode(n: MeshNode) { currentNode = n }
         const val EXTRA_PEER_ID = "peer_id"
         const val EXTRA_PEER_IP = "peer_ip"
         const val EXTRA_PEER_NAME = "peer_name"
     }
 
-    private lateinit var mesh: MeshNode
     private lateinit var peerId: String
     private lateinit var peerIp: String
     private lateinit var peerName: String
@@ -43,7 +42,7 @@ class ChatActivity : AppCompatActivity() {
     private val filePicker = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { res ->
         if (res.resultCode == Activity.RESULT_OK) {
             res.data?.data?.let { uri ->
-                mesh.sendFile(uri, peerIp, peerId)
+                ZvonController.meshNode?.sendFile(uri, peerIp, peerId)
                 Toast.makeText(this, "Отправляю файл…", Toast.LENGTH_SHORT).show()
                 reload()
             }
@@ -52,7 +51,6 @@ class ChatActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        mesh = currentNode ?: run { finish(); return }
         peerId = intent.getStringExtra(EXTRA_PEER_ID) ?: run { finish(); return }
         peerIp = intent.getStringExtra(EXTRA_PEER_IP) ?: ""
         peerName = intent.getStringExtra(EXTRA_PEER_NAME) ?: peerId.take(8)
@@ -62,15 +60,32 @@ class ChatActivity : AppCompatActivity() {
         messagesView = findViewById(R.id.messagesView)
         input = findViewById(R.id.input)
 
-        findViewById<com.google.android.material.appbar.MaterialToolbar>(R.id.toolbar).apply {
+        findViewById<MaterialToolbar>(R.id.toolbar).apply {
             title = "💬 $peerName"
             setNavigationOnClickListener { finish() }
+            inflateMenu(R.menu.chat_menu)
+            setOnMenuItemClickListener { item ->
+                when (item.itemId) {
+                    R.id.action_call -> {
+                        if (peerIp.isNotBlank()) {
+                            ZvonController.meshNode?.call(peerIp)
+                            startActivity(Intent(this@ChatActivity, MainActivity::class.java).apply {
+                                flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                            })
+                            finish()
+                        } else Toast.makeText(this@ChatActivity, "Нет соединения", Toast.LENGTH_SHORT).show()
+                        true
+                    }
+                    else -> false
+                }
+            }
         }
-        findViewById<com.google.android.material.button.MaterialButton>(R.id.btnAttach).setOnClickListener {
+
+        findViewById<MaterialButton>(R.id.btnAttach).setOnClickListener {
             val i = Intent(Intent.ACTION_GET_CONTENT).apply { type = "*/*" }
             filePicker.launch(i)
         }
-        findViewById<com.google.android.material.button.MaterialButton>(R.id.btnSend).setOnClickListener { send() }
+        findViewById<MaterialButton>(R.id.btnSend).setOnClickListener { send() }
 
         reload()
 
@@ -94,7 +109,6 @@ class ChatActivity : AppCompatActivity() {
         ZvonController.setActiveChat(null)
     }
 
-
     private fun send() {
         val txt = input.text.toString().trim()
         if (txt.isEmpty()) return
@@ -102,38 +116,51 @@ class ChatActivity : AppCompatActivity() {
             Toast.makeText(this, "Нет соединения с пиром", Toast.LENGTH_SHORT).show()
             return
         }
-        mesh.sendText(peerId, peerIp, txt)
+        ZvonController.meshNode?.sendText(peerId, peerIp, txt)
         input.setText("")
         reload()
+        scroll.post { scroll.fullScroll(ScrollView.FOCUS_DOWN) }
     }
 
     private fun reload() {
         messagesView.removeAllViews()
+        val mesh = ZvonController.meshNode ?: return
         for (m in mesh.chatStore.history(peerId)) addBubble(m)
         scroll.post { scroll.fullScroll(ScrollView.FOCUS_DOWN) }
     }
 
     private fun addBubble(m: Message) {
-        val bubble = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(24, 12, 24, 12)
-            setBackgroundColor(if (m.fromMe) 0xFF2C5F2D.toInt() else 0xFF2A2A2A.toInt())
+        val bubble = MaterialCardView(this).apply {
+            setCardBackgroundColor(if (m.fromMe) 0xFF2B5278.toInt() else 0xFF182533.toInt())
+            radius = 16f * resources.displayMetrics.density
+            cardElevation = 0f
             layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply {
                 gravity = if (m.fromMe) Gravity.END else Gravity.START
                 setMargins(8, 4, 8, 4)
             }
         }
+        val inner = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(24, 12, 24, 12)
+        }
         val body = if (m.kind == "file")
             "📎 ${m.body}${m.filePath?.let { "\n✓ " + java.io.File(it).name } ?: ""}"
         else m.body
-        bubble.addView(TextView(this).apply {
-            text = body; setTextColor(0xFFFFFFFF.toInt()); textSize = 14f
+        inner.addView(TextView(this).apply {
+            text = body
+            setTextColor(0xFFE1E9F0.toInt())
+            textSize = 14f
         })
-        bubble.addView(TextView(this).apply {
-            text = timeFmt.format(Date(m.tsMs)); setTextColor(0xFF888888.toInt()); textSize = 10f
+        inner.addView(TextView(this).apply {
+            text = timeFmt.format(Date(m.tsMs)) + if (m.fromMe) " ✓✓" else ""
+            setTextColor(0xFF708499.toInt())
+            textSize = 10f
             gravity = Gravity.END
         })
+        bubble.addView(inner)
         messagesView.addView(bubble)
     }
 }

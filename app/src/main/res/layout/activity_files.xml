@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:orientation="vertical" android:background="@color/z_bg">
+
+    <com.google.android.material.appbar.MaterialToolbar
+        android:id="@+id/filesToolbar"
+        android:layout_width="match_parent" android:layout_height="?attr/actionBarSize"
+        android:background="@color/z_surface"
+        app:navigationIcon="@android:drawable/ic_menu_revert"
+        app:title="📁 Принятые файлы"
+        app:titleTextColor="@color/z_text_primary" />
+
+    <TextView android:id="@+id/filesEmpty"
+        android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:padding="24dp" android:text="Пока нет принятых файлов"
+        android:textColor="@color/z_text_secondary" android:textSize="14sp"
+        android:visibility="gone" />
+
+    <ScrollView android:layout_width="match_parent" android:layout_height="0dp"
+        android:layout_weight="1">
+        <LinearLayout android:id="@+id/filesList"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="vertical" android:padding="12dp" />
+    </ScrollView>
+</LinearLayout>

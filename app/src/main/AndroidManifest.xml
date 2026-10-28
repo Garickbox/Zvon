@@ -60,5 +60,10 @@
             android:excludeFromRecents="true"
             android:launchMode="singleTop"
             android:theme="@style/Theme.Zvon" />
+            <activity
+            android:name=".FilesActivity"
+            android:exported="false"
+            android:parentActivityName=".MainActivity"
+            android:theme="@style/Theme.Zvon" />
     </application>
 </manifest>
