@@ -7,10 +7,7 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 
 class PeerTestRunner(
-    private val mesh: MeshNode,
-    var onProgress: ((String) -> Unit)? = null
-    var onIncomingInvite: (suspend (fromIp: String, id: String) -> Boolean)? = null
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val mesh: MeshNode
 ) {
     data class Report(
         val success: Boolean,
@@ -19,6 +16,11 @@ class PeerTestRunner(
         val textSent: Int, val textReceived: Int, val textDups: Int, val textInOrder: Boolean,
         val error: String? = null
     )
+
+    var onProgress: ((String) -> Unit)? = null
+    var onIncomingInvite: (suspend (fromIp: String, id: String) -> Boolean)? = null
+
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     @Volatile private var masterPeerIp: String? = null
     @Volatile private var testId: String = ""
@@ -43,7 +45,10 @@ class PeerTestRunner(
                 InAppLogger.write('I', "PeerTest", "accept received → go")
                 acceptWaiter.complete(true)
             }
-            "decline" -> if (masterMode && !acceptWaiter.isCompleted) acceptWaiter.complete(false)
+            "decline" -> if (masterMode && !acceptWaiter.isCompleted) {
+                InAppLogger.write('I', "PeerTest", "decline received")
+                acceptWaiter.complete(false)
+            }
             "ping" -> sendTest(fromIp, p.id, "pong", p.seq)
             "pong" -> pongs[p.seq] = System.currentTimeMillis()
             "voice" -> slaveVoiceCount.incrementAndGet()
@@ -69,7 +74,7 @@ class PeerTestRunner(
 
     private fun handleInvite(fromIp: String, p: TestPacket) {
         InAppLogger.write('I', "PeerTest", "invite from $fromIp id=${p.id} master=$masterMode")
-        // Race-fix: если мы уже master — отказываем, не пытаемся стать slave
+        // Race-fix: если мы уже master — отказываем
         if (masterMode) {
             InAppLogger.write('W', "PeerTest", "already master → decline")
             sendTest(fromIp, p.id, "decline")
@@ -119,8 +124,8 @@ class PeerTestRunner(
         try {
             onProgress?.invoke("Приглашаем пира…")
             sendTest(peerIp, testId, "invite")
-            val accepted = withTimeoutOrNull(15_000) { acceptWaiter.await() } ?: false
-            if (!accepted) return@coroutineScope Report(false, 0, 0, 0, 0, 0, 0, 0, 0, false, "Пир не принял приглашение (timeout 15s)")
+            val accepted = withTimeoutOrNull(65_000) { acceptWaiter.await() } ?: false
+            if (!accepted) return@coroutineScope Report(false, 0, 0, 0, 0, 0, 0, 0, 0, false, "Пир не принял приглашение")
 
             onProgress?.invoke("Рукопожатие (5 пакетов)…")
             for (i in 1..5L) {
@@ -145,7 +150,8 @@ class PeerTestRunner(
             onProgress?.invoke("Текст: 10 сообщений…")
             for (i in 1..10L) { sendTest(peerIp, testId, "text", i, "MSG$i"); delay(30) }
             sendTest(peerIp, testId, "text_done_req")
-            val tJson = withTimeoutOrNull(5000) { textDone.await() } ?: return@coroutineScope Report(false, rtts.min(), rtts.average().toLong(), rtts.max(), 100, vRecv, 10, 0, 0, false, "Text: нет ответа")
+            val tJson = withTimeoutOrNull(5000) { textDone.await() }
+                ?: return@coroutineScope Report(false, rtts.min(), rtts.average().toLong(), rtts.max(), 100, vRecv, 10, 0, 0, false, "Text: нет ответа")
             val tObj = JSONObject(tJson)
 
             onProgress?.invoke("Готово")
