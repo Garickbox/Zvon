@@ -207,14 +207,17 @@ class SelfTestRunner(private val context: Context) {
         } catch (e: Exception) { enc.release(); dec.release(); false to "${e.message}" }
     }
 
-    private fun checkPacket(): Pair<Boolean, String> = try {
-        val p = MeshPacket(PacketType.TEXT, UUID.randomUUID(), MeshPacket.BROADCAST,
-            System.nanoTime(), "selftest".toByteArray())
-        val enc = MeshPacket.encode(p)
-        val dec = MeshPacket.decode(enc) ?: return false to "decode = null"
-        if (dec.type == p.type && dec.sourceId == p.sourceId) true to "${enc.size}B"
-        else false to "mismatch"
-    } catch (e: Exception) { false to "${e.message}" }
+    private fun checkPacket(): Pair<Boolean, String> {
+        return try {
+            val p = MeshPacket(PacketType.TEXT, UUID.randomUUID(), MeshPacket.BROADCAST,
+                System.nanoTime(), "selftest".toByteArray())
+            val enc = MeshPacket.encode(p)
+            val dec = MeshPacket.decode(enc)
+            if (dec == null) false to "decode = null"
+            else if (dec.type == p.type && dec.sourceId == p.sourceId) true to "${enc.size}B"
+            else false to "mismatch"
+        } catch (e: Exception) { false to "${e.message}" }
+    }
 
     private fun checkLogger(): Pair<Boolean, String> = try {
         val before = InAppLogger.sizeBytes()
@@ -269,23 +272,28 @@ class SelfTestRunner(private val context: Context) {
         if (code in 200..399) true to "HTTP $code" else false to "HTTP $code"
     } catch (e: Exception) { false to "нет связи: ${e.message?.take(50)}" }
 
-    private fun checkOTA(): Pair<Boolean, String> = try {
-        val conn = URL("https://api.github.com/repos/Garickbox/Zvon/releases/latest").openConnection() as HttpURLConnection
-        conn.requestMethod = "GET"; conn.setRequestProperty("Accept", "application/vnd.github+json")
-        conn.setRequestProperty("User-Agent", "Zvon")
-        conn.connectTimeout = 5000; conn.readTimeout = 5000
-        if (conn.responseCode != 200) return true to "HTTP ${conn.responseCode}"
-        val json = conn.inputStream.bufferedReader().use { it.readText() }
-        val tag = JSONObject(json).optString("tag_name", "")
-        val latest = tag.removePrefix("build-").toIntOrNull()
-        conn.disconnect()
-        val current = try { context.packageManager.getPackageInfo(context.packageName, 0).longVersionCode.toInt() } catch (_: Exception) { 0 }
-        when {
-            latest == null -> true to "тег: $tag"
-            latest > current -> false to "доступно build-$latest (у тебя $current)"
-            else -> true to "последняя (build-$current)"
-        }
-    } catch (e: Exception) { true to "отложено: ${e.message?.take(40)}" }
+    private fun checkOTA(): Pair<Boolean, String> {
+        return try {
+            val conn = URL("https://api.github.com/repos/Garickbox/Zvon/releases/latest").openConnection() as HttpURLConnection
+            conn.requestMethod = "GET"; conn.setRequestProperty("Accept", "application/vnd.github+json")
+            conn.setRequestProperty("User-Agent", "Zvon")
+            conn.connectTimeout = 5000; conn.readTimeout = 5000
+            if (conn.responseCode != 200) {
+                true to "HTTP ${conn.responseCode}"
+            } else {
+                val json = conn.inputStream.bufferedReader().use { it.readText() }
+                val tag = JSONObject(json).optString("tag_name", "")
+                val latest = tag.removePrefix("build-").toIntOrNull()
+                conn.disconnect()
+                val current = try { context.packageManager.getPackageInfo(context.packageName, 0).longVersionCode.toInt() } catch (_: Exception) { 0 }
+                when {
+                    latest == null -> true to "тег: $tag"
+                    latest > current -> false to "доступно build-$latest (у тебя $current)"
+                    else -> true to "последняя (build-$current)"
+                }
+            }
+        } catch (e: Exception) { true to "отложено: ${e.message?.take(40)}" }
+    }
 
     private fun checkInstallPermission(): Pair<Boolean, String> =
         if (Build.VERSION.SDK_INT >= 26) {
