@@ -487,6 +487,103 @@ class MainActivity : AppCompatActivity() {
     }
 
 
+
+    private var updateDialog: AlertDialog? = null
+    private var updateDownloading = false
+
+    private fun checkUpdateOnStart() {
+        val prefs = getSharedPreferences("zvon_update", MODE_PRIVATE)
+        val lastCheck = prefs.getLong("last_check_ms", 0L)
+        // Не чаще раза в 30 минут
+        if (System.currentTimeMillis() - lastCheck < 30 * 60 * 1000L) {
+            InAppLogger.write('I', "Update", "skip, checked recently")
+            return
+        }
+        prefs.edit().putLong("last_check_ms", System.currentTimeMillis()).apply()
+
+        lifecycleScope.launch {
+            val info = UpdateChecker.checkForUpdate() ?: return@launch
+            val current = try { packageManager.getPackageInfo(packageName, 0).longVersionCode.toInt() } catch (_: Exception) { 0 }
+            InAppLogger.write('I', "Update", "current=$current latest=${info.versionCode}")
+            if (info.versionCode > current) {
+                showUpdateDialog(info, current)
+            }
+        }
+    }
+
+    private fun showUpdateDialog(info: UpdateChecker.UpdateInfo, current: Int) {
+        if (updateDialog?.isShowing == true) return
+        updateDialog = AlertDialog.Builder(this)
+            .setTitle("Доступно обновление")
+            .setMessage("Установлено: build-$current\nДоступно: ${info.tagName}\nРазмер: ${info.apkSize / 1024 / 1024} МБ")
+            .setCancelable(true)
+            .setPositiveButton("Скачать и установить") { _, _ -> startUpdateDownload(info) }
+            .setNegativeButton("Позже") { d, _ -> d.dismiss() }
+            .setNeutralButton("Отключить") { _, _ ->
+                getSharedPreferences("zvon_update", MODE_PRIVATE).edit().putBoolean("disabled", true).apply()
+                Toast.makeText(this, "Автообновление отключено (можно вернуть кнопкой)", Toast.LENGTH_LONG).show()
+            }
+            .show()
+    }
+
+    private fun startUpdateDownload(info: UpdateChecker.UpdateInfo) {
+        if (updateDownloading) return
+        updateDownloading = true
+        val progress = android.app.ProgressDialog(this).apply {
+            setTitle("Скачивание обновления")
+            setMessage("0%")
+            setCancelable(false)
+            show()
+        }
+        lifecycleScope.launch {
+            val file = UpdateChecker.downloadApk(this@MainActivity, info) { received, total ->
+                runOnUiThread {
+                    val pct = if (total > 0) (received * 100 / total).toInt() else 0
+                    progress.setMessage("$pct% (${received / 1024} / ${total / 1024} КБ)")
+                }
+            }
+            progress.dismiss()
+            updateDownloading = false
+            if (file == null) {
+                Toast.makeText(this@MainActivity, "Ошибка скачивания, попробуй позже", Toast.LENGTH_LONG).show()
+                return@launch
+            }
+            if (!UpdateChecker.canInstall(this@MainActivity)) {
+                AlertDialog.Builder(this@MainActivity)
+                    .setTitle("Разрешить установку")
+                    .setMessage("Чтобы обновить Zvon, разрешите установку из этого источника в настройках.")
+                    .setPositiveButton("Открыть настройки") { _, _ ->
+                        UpdateChecker.requestInstallPermission(this@MainActivity)
+                    }
+                    .setNegativeButton("Позже", null)
+                    .show()
+                return@launch
+            }
+            if (!UpdateChecker.installApk(this@MainActivity, file)) {
+                Toast.makeText(this@MainActivity, "Не удалось запустить установку", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    private fun manualCheckUpdate() {
+        getSharedPreferences("zvon_update", MODE_PRIVATE).edit()
+            .putLong("last_check_ms", 0L)
+            .putBoolean("disabled", false)
+            .apply()
+        Toast.makeText(this, "Проверяю обновления…", Toast.LENGTH_SHORT).show()
+        lifecycleScope.launch {
+            val info = UpdateChecker.checkForUpdate()
+            val current = try { packageManager.getPackageInfo(packageName, 0).longVersionCode.toInt() } catch (_: Exception) { 0 }
+            if (info == null) {
+                Toast.makeText(this@MainActivity, "Не удалось проверить (нет сети или нет релизов)", Toast.LENGTH_LONG).show()
+            } else if (info.versionCode > current) {
+                showUpdateDialog(info, current)
+            } else {
+                Toast.makeText(this@MainActivity, "У тебя последняя версия (build-$current)", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
     private fun showNotifAccessDialog() {
         val enabled = isNotificationListenerEnabled()
         val msg = if (enabled) "✅ Уже включён.\n\nПолучено уведомлений: ${ZvonNotificationListener.receivedCount}"
