@@ -7,6 +7,8 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.media.AudioManager
+import android.media.Ringtone
+import android.media.RingtoneManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -33,6 +35,7 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var meshNode: MeshNode
     private var pipeline: AudioPipeline? = null
+    private var ringtone: Ringtone? = null
 
     private lateinit var statusText: TextView
     private lateinit var peerList: LinearLayout
@@ -41,6 +44,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnRaw: Button
     private lateinit var btnLoopback: Button
     private lateinit var btnShareLog: Button
+    private lateinit var btnChats: Button
     private lateinit var discoveryView: View
     private lateinit var callView: View
     private lateinit var callStatus: TextView
@@ -52,12 +56,16 @@ class MainActivity : AppCompatActivity() {
 
     private var isStopping = false
     @Volatile private var currentPeerIp: String? = null
+    @Volatile private var currentPeerId: String? = null
     private var callStartMs = 0L
     private var durationJob: Job? = null
+    private var showingChats = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+        NotificationHelper.createChannels(this)
+        
         statusText = findViewById(R.id.statusText)
         peerList = findViewById(R.id.peerList)
         btnDiscover = findViewById(R.id.btnDiscover)
@@ -65,6 +73,7 @@ class MainActivity : AppCompatActivity() {
         btnRaw = findViewById(R.id.btnRaw)
         btnLoopback = findViewById(R.id.btnLoopback)
         btnShareLog = findViewById(R.id.btnShareLog)
+        btnChats = findViewById(R.id.btnChats)
         discoveryView = findViewById(R.id.discoveryView)
         callView = findViewById(R.id.callView)
         callStatus = findViewById(R.id.callStatus)
@@ -73,11 +82,13 @@ class MainActivity : AppCompatActivity() {
         callStats = findViewById(R.id.callStats)
         btnMute = findViewById(R.id.btnMute)
         btnSpeaker = findViewById(R.id.btnSpeaker)
+        
         findViewById<Button>(R.id.btnHangup).setOnClickListener { meshNode.endCall() }
         btnMute.setOnClickListener { toggleMute() }
         btnSpeaker.setOnClickListener { toggleSpeaker() }
         btnShareLog.setOnClickListener { shareLog() }
-        InAppLogger.write('I', "UI", "onCreate")
+        btnChats.setOnClickListener { toggleChatsView() }
+
         requestPerms()
         requestBatteryExemption()
         maybeShowMiuiHint()
@@ -87,23 +98,26 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupMesh() {
         meshNode = MeshNode(this)
-        meshNode.onPeersChanged = { peers -> runOnUiThread { renderPeers(peers) } }
+        meshNode.onPeersChanged = { peers -> runOnUiThread { if (!showingChats) renderPeers(peers) } }
         meshNode.onGroupFormed = { myIp, peerIp, isGo -> runOnUiThread { onGroupReady(myIp, peerIp, isGo) } }
-        meshNode.onGroupLost = { runOnUiThread { statusText.text = "Группа потеряна"; renderContacts() } }
+        meshNode.onGroupLost = { runOnUiThread { statusText.text = "Группа потеряна"; if (showingChats) renderChats() } }
         meshNode.onIncomingCall = { ip -> runOnUiThread { showIncomingDialog(ip) } }
-        meshNode.onCallConnected = { runOnUiThread { showInCallUi("Соединено"); startDurationTimer() } }
-        meshNode.onCallEnded = { reason -> runOnUiThread { hideCallUi(reason) } }
+        meshNode.onCallConnected = { runOnUiThread { stopRingtone(); showInCallUi("Соединено"); startDurationTimer() } }
+        meshNode.onCallEnded = { reason -> runOnUiThread { stopRingtone(); hideCallUi(reason) } }
         meshNode.onVoiceReceived = { seq, data -> pipeline?.onNetworkVoicePacket(seq, data) }
-        meshNode.onContactsChanged = { runOnUiThread { renderContacts() } }
-        meshNode.onTextReceived = { fromId, _, text -> runOnUiThread {
-            Toast.makeText(this, "💬 ${fromId.take(8)}: ${text.take(30)}", Toast.LENGTH_SHORT).show()
+        meshNode.onContactsChanged = { runOnUiThread { if (showingChats) renderChats() } }
+        
+        meshNode.onTextReceived = { fromId, text -> runOnUiThread {
+            NotificationHelper.showMessage(this, fromId, text)
+            if (showingChats) renderChats()
         } }
+        
         meshNode.onFileOffer = { id, name, size, _ ->
             suspendCancellableCoroutine { cont ->
                 runOnUiThread {
                     AlertDialog.Builder(this)
                         .setTitle("📎 Входящий файл")
-                        .setMessage("$name (${size / 1024} КБ)\nОт: ${meshNode.currentPeerIp()}")
+                        .setMessage("$name (${size / 1024} КБ)")
                         .setCancelable(false)
                         .setPositiveButton("Принять") { _, _ -> cont.resumeWith(Result.success(true)) }
                         .setNegativeButton("Отклонить") { _, _ -> cont.resumeWith(Result.success(false)) }
@@ -113,13 +127,12 @@ class MainActivity : AppCompatActivity() {
         }
         meshNode.onFileProgress = { _, name, sent, total, done, err -> runOnUiThread {
             if (done) {
-                val msg = if (err != null) "❌ $name: $err" else "✅ $name получен"
-                Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
+                Toast.makeText(this, if (err != null) "❌ $name: $err" else "✅ $name получен", Toast.LENGTH_LONG).show()
             } else if (total > 0) {
-                val pct = (sent * 100 / total).toInt()
-                statusText.text = "📎 $name: $pct%"
+                statusText.text = "📎 $name: ${sent * 100 / total}%"
             }
         } }
+        
         ChatActivity.setNode(meshNode)
         meshNode.start()
         
@@ -131,25 +144,42 @@ class MainActivity : AppCompatActivity() {
         }, 2000)
     }
 
-    private fun renderContacts() {
-        if (peerList.childCount > 0) return
-        val contacts = meshNode.contactsStore.all()
-        if (contacts.isEmpty()) return
+    private fun toggleChatsView() {
+        showingChats = !showingChats
+        if (showingChats) renderChats() else peerList.removeAllViews()
+    }
+
+    private fun renderChats() {
         peerList.removeAllViews()
-        for (c in contacts) {
-            val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, 12, 0, 12) }
+        val peers = meshNode.chatStore.allPeers()
+        if (peers.isEmpty()) {
+            peerList.addView(TextView(this).apply { text = "Нет сообщений"; setTextColor(0xFFAAAAAA.toInt()); textSize = 14f })
+            return
+        }
+        for (peer in peers) {
+            val last = meshNode.chatStore.lastMessage(peer) ?: continue
+            val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, 16, 0, 16) }
             row.addView(TextView(this).apply {
-                text = (if (c.online) "🟢 " else "⚪ ") + c.name + "\n" + c.lastIp
+                text = "💬 ${peer.take(8)}\n${last.body.take(30)}"
                 setTextColor(0xFFFFFFFF.toInt()); textSize = 14f
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
             })
+            row.setOnClickListener { openChat(peer, meshNode.currentPeerIp() ?: "192.168.49.1") }
             peerList.addView(row)
         }
     }
 
+    private fun openChat(peerId: String, peerIp: String) {
+        startActivity(Intent(this, ChatActivity::class.java).apply {
+            putExtra(ChatActivity.EXTRA_PEER_ID, peerId)
+            putExtra(ChatActivity.EXTRA_PEER_IP, peerIp)
+            putExtra(ChatActivity.EXTRA_PEER_NAME, peerId.take(8))
+        })
+    }
+
     private fun wireUi() {
-        btnForceReset.setOnClickListener { statusText.text = "Сброс…"; peerList.removeAllViews(); meshNode.forceReset() }
-        btnDiscover.setOnClickListener { peerList.removeAllViews(); statusText.text = "Поиск..."; meshNode.discover() }
+        btnForceReset.setOnClickListener { showingChats = false; statusText.text = "Сброс…"; peerList.removeAllViews(); meshNode.forceReset() }
+        btnDiscover.setOnClickListener { showingChats = false; peerList.removeAllViews(); statusText.text = "Поиск..."; meshNode.discover() }
         btnRaw.setOnClickListener { toggleLoopback(PipelineMode.RAW_CODEC) }
         btnLoopback.setOnClickListener { toggleLoopback(PipelineMode.FULL_LOOPBACK) }
     }
@@ -162,32 +192,25 @@ class MainActivity : AppCompatActivity() {
             statusText.text = "Работает: $mode"
             btnRaw.isEnabled = false; btnLoopback.isEnabled = false
         } else {
-            isStopping = true
-            btnRaw.isEnabled = false; btnLoopback.isEnabled = false
-            lifecycleScope.launch {
-                p.stop(); pipeline = null
-                statusText.text = "Остановлено"
-                btnRaw.isEnabled = true; btnLoopback.isEnabled = true; isStopping = false
-            }
+            isStopping = true; btnRaw.isEnabled = false; btnLoopback.isEnabled = false
+            lifecycleScope.launch { p.stop(); pipeline = null; statusText.text = "Остановлено"; btnRaw.isEnabled = true; btnLoopback.isEnabled = true; isStopping = false }
         }
     }
 
     private fun renderPeers(peers: List<MeshNode.WifiP2pDeviceInfo>) {
         peerList.removeAllViews()
-        if (peers.isEmpty()) { statusText.text = "Никого не найдено"; renderContacts(); return }
+        if (peers.isEmpty()) { statusText.text = "Никого не найдено"; return }
         statusText.text = "Найдено: ${peers.size}"
         peers.forEach { peer ->
             val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, 8, 0, 8) }
             row.addView(TextView(this).apply {
-                text = "${peer.name}\n${peer.address}"
-                setTextColor(0xFFFFFFFF.toInt()); textSize = 14f
+                text = "${peer.name}\n${peer.address}"; setTextColor(0xFFFFFFFF.toInt()); textSize = 14f
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
             })
             row.addView(Button(this).apply {
                 text = "Подключить"
                 setOnClickListener { btn ->
                     isEnabled = false; text = "Подключение…"
-                    statusText.text = "Подключение к ${peer.address}…"
                     meshNode.connectTo(peer.raw)
                     (btn as Button).postDelayed({ if (!isEnabled) { isEnabled = true; text = "Подключить" } }, 35000)
                 }
@@ -198,26 +221,16 @@ class MainActivity : AppCompatActivity() {
 
     private fun onGroupReady(myIp: String, peerIp: String?, isGo: Boolean) {
         statusText.text = "Группа OK. я=$myIp пир=${peerIp ?: "?"} GO=$isGo"
-        Toast.makeText(this, "Wi-Fi Direct подключён", Toast.LENGTH_SHORT).show()
         currentPeerIp = peerIp
+        currentPeerId = meshNode.currentPeerId() ?: peerIp
         peerList.removeAllViews()
         if (peerIp != null) {
             peerList.addView(Button(this).apply {
-                text = "📞 Позвонить $peerIp"
-                setOnClickListener { callPeer(peerIp) }
+                text = "📞 Позвонить"; setOnClickListener { callPeer(peerIp) }
             })
             peerList.addView(Button(this).apply {
-                text = "💬 Чат с $peerIp"
-                setOnClickListener {
-                    startActivity(Intent(this@MainActivity, ChatActivity::class.java).apply {
-                        putExtra(ChatActivity.EXTRA_PEER_ID, peerIp)
-                        putExtra(ChatActivity.EXTRA_PEER_IP, peerIp)
-                        putExtra(ChatActivity.EXTRA_PEER_NAME, peerIp)
-                    })
-                }
+                text = "💬 Чат"; setOnClickListener { openChat(currentPeerId ?: peerIp, peerIp) }
             })
-        } else {
-            peerList.addView(TextView(this).apply { text = "Ожидание партнёра..."; setTextColor(0xFFAAAAAA.toInt()); textSize = 13f })
         }
     }
 
@@ -231,35 +244,37 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showIncomingDialog(ip: String) {
+        playRingtone()
         AlertDialog.Builder(this).setTitle("Входящий звонок").setMessage("От $ip").setCancelable(false)
             .setPositiveButton("Принять") { _, _ ->
-                currentPeerIp = ip
-                startNetworkPipeline(ip)
-                meshNode.acceptCall(ip)
-                enterCallAudioMode()
-                showInCallUi("Соединено")
-                startDurationTimer()
+                stopRingtone(); currentPeerIp = ip
+                startNetworkPipeline(ip); meshNode.acceptCall(ip); enterCallAudioMode()
+                showInCallUi("Соединено"); startDurationTimer()
             }
-            .setNegativeButton("Отклонить") { _, _ -> meshNode.declineCall(ip) }.show()
+            .setNegativeButton("Отклонить") { _, _ -> stopRingtone(); meshNode.declineCall(ip) }.show()
     }
+
+    private fun playRingtone() {
+        try {
+            val uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
+            ringtone = RingtoneManager.getRingtone(applicationContext, uri)
+            ringtone?.play()
+        } catch (_: Exception) { }
+    }
+    private fun stopRingtone() { try { ringtone?.stop() } catch (_: Exception) { }; ringtone = null }
 
     private fun startNetworkPipeline(peerIp: String) {
         MeshForegroundService.start(this, peerIp)
-        val p = AudioPipeline(
-            mode = PipelineMode.NETWORK,
-            voiceSender = { seq, data, ip -> meshNode.sendVoice(seq, data, ip) }
-        )
+        val p = AudioPipeline(mode = PipelineMode.NETWORK, voiceSender = { seq, data, ip -> meshNode.sendVoice(seq, data, ip) })
         p.start(peerIp); pipeline = p
     }
 
     private fun showInCallUi(status: String) {
         discoveryView.visibility = View.GONE; callView.visibility = View.VISIBLE
         callStatus.text = status
-        callPeer.text = currentPeerIp ?: meshNode.currentPeerIp() ?: "peer"
+        callPeer.text = currentPeerIp ?: "peer"
         btnMute.text = "Без звука"
-        @Suppress("DEPRECATION")
-        val isSpk = (getSystemService(Context.AUDIO_SERVICE) as AudioManager).isSpeakerphoneOn
-        btnSpeaker.text = if (isSpk) "📢 Динамик" else "📞 Телефон"
+        btnSpeaker.text = "📞 Телефон"
     }
 
     private fun hideCallUi(reason: String) {
@@ -268,14 +283,7 @@ class MainActivity : AppCompatActivity() {
         val p = pipeline; pipeline = null
         MeshForegroundService.stop(this)
         if (p != null) lifecycleScope.launch { p.stop() }
-        if (meshNode.isInGroup()) {
-            val peer = meshNode.currentPeerIp() ?: meshNode.lastKnownPeerIp()
-            statusText.text = "Группа активна ($reason)"
-            peerList.removeAllViews()
-            if (peer != null) peerList.addView(Button(this).apply {
-                text = "📞 Позвонить снова $peer"; setOnClickListener { callPeer(peer) }
-            })
-        } else { statusText.text = "Звонок завершён ($reason)"; renderContacts() }
+        statusText.text = "Звонок завершён ($reason)"
     }
 
     private fun toggleMute() {
@@ -304,15 +312,13 @@ class MainActivity : AppCompatActivity() {
             }
         }
     }
-
     private fun stopDurationTimer() { durationJob?.cancel(); durationJob = null; callDuration.text = "00:00"; callStats.text = "" }
 
     private fun enterCallAudioMode() {
         try {
             val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
             am.mode = AudioManager.MODE_IN_COMMUNICATION
-            @Suppress("DEPRECATION") am.isSpeakerphoneOn = true
-            @Suppress("DEPRECATION") am.setStreamVolume(AudioManager.STREAM_VOICE_CALL, am.getStreamMaxVolume(AudioManager.STREAM_VOICE_CALL), 0)
+            @Suppress("DEPRECATION") am.isSpeakerphoneOn = false
         } catch (_: Exception) { }
     }
 
@@ -331,8 +337,7 @@ class MainActivity : AppCompatActivity() {
         try {
             val uri: Uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", f)
             startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
-                type = "text/plain"; putExtra(Intent.EXTRA_STREAM, uri)
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                type = "text/plain"; putExtra(Intent.EXTRA_STREAM, uri); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }, "Поделиться логом"))
         } catch (e: Exception) { Toast.makeText(this, "Ошибка: ${e.message}", Toast.LENGTH_LONG).show() }
     }

@@ -18,6 +18,9 @@
             android:orientation="horizontal" android:layout_marginTop="12dp">
             <Button android:id="@+id/btnDiscover" android:layout_width="0dp"
                 android:layout_weight="1" android:layout_height="wrap_content" android:text="Поиск"/>
+            <Button android:id="@+id/btnChats" android:layout_width="0dp"
+                android:layout_weight="1" android:layout_height="wrap_content"
+                android:layout_marginStart="8dp" android:text="Чаты"/>
             <Button android:id="@+id/btnForceReset" android:layout_width="0dp"
                 android:layout_weight="1" android:layout_height="wrap_content"
                 android:layout_marginStart="8dp" android:text="Сброс"/>
@@ -49,16 +52,13 @@
         <TextView android:id="@+id/callStatus" android:layout_width="wrap_content"
             android:layout_height="wrap_content" android:text="Звонок" android:textColor="#FFFFFF"
             android:textSize="26sp" android:textStyle="bold"/>
-
         <TextView android:id="@+id/callPeer" android:layout_width="wrap_content"
             android:layout_height="wrap_content" android:layout_marginTop="8dp"
             android:text="" android:textColor="#AAAAAA" android:textSize="14sp"/>
-
         <TextView android:id="@+id/callDuration" android:layout_width="wrap_content"
             android:layout_height="wrap_content" android:layout_marginTop="16dp"
             android:text="00:00" android:textColor="#FFFFFF" android:textSize="48sp"
             android:fontFamily="monospace"/>
-
         <TextView android:id="@+id/callStats" android:layout_width="wrap_content"
             android:layout_height="wrap_content" android:layout_marginTop="8dp"
             android:text="" android:textColor="#666666" android:textSize="10sp"
@@ -71,7 +71,7 @@
                 android:layout_marginEnd="6dp" android:text="Без звука"/>
             <Button android:id="@+id/btnSpeaker" android:layout_width="0dp"
                 android:layout_weight="1" android:layout_height="wrap_content"
-                android:layout_marginStart="6dp" android:text="📢 Динамик"/>
+                android:layout_marginStart="6dp" android:text="📞 Телефон"/>
         </LinearLayout>
 
         <Button android:id="@+id/btnHangup" android:layout_width="match_parent"

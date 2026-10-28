@@ -48,11 +48,6 @@ class WifiDirectManager(
         }
         context.registerReceiver(r, filter)
         receiver = r
-        try {
-            manager?.requestGroupInfo(channel) { g ->
-                logger.d("current group: ${if (g == null) "NONE" else "name=${g.networkName} isGO=${g.isGroupOwner}"}")
-            }
-        } catch (_: Exception) { }
     }
 
     @SuppressLint("MissingPermission")
@@ -73,14 +68,12 @@ class WifiDirectManager(
                 deferred.complete(list?.deviceList?.toList() ?: emptyList())
             } ?: deferred.complete(emptyList())
         }
-        val peers = deferred.await()
-        logger.d("peers changed: ${peers.size} found")
-        onPeersChanged?.invoke(peers)
+        onPeersChanged?.invoke(deferred.await())
     }
 
     @SuppressLint("MissingPermission")
-    fun connectSafe(device: WifiP2pDevice) {
-        logger.d("connectSafe → ${device.deviceAddress}")
+    fun connectSafe(mac: String) {
+        logger.d("connectSafe → $mac")
         scope.launch {
             try { manager?.cancelConnect(channel, null) } catch (_: Exception) { }
             delay(300)
@@ -93,51 +86,35 @@ class WifiDirectManager(
                 success = try {
                     val ok = CompletableDeferred<Boolean>()
                     val config = WifiP2pConfig().apply {
-                        deviceAddress = device.deviceAddress
+                        deviceAddress = mac
                         groupOwnerIntent = 0
                     }
                     manager?.connect(channel, config, object : WifiP2pManager.ActionListener {
-                        override fun onSuccess() {
-                            logger.d("connectSafe: initiated")
-                            ok.complete(true)
-                        }
+                        override fun onSuccess() { logger.d("connectSafe: initiated"); ok.complete(true) }
                         override fun onFailure(reason: Int) {
-                            val r = when (reason) {
-                                WifiP2pManager.BUSY -> "BUSY"
-                                WifiP2pManager.ERROR -> "ERROR"
-                                WifiP2pManager.P2P_UNSUPPORTED -> "P2P_UNSUPPORTED"
-                                else -> "reason=$reason"
-                            }
-                            logger.w("connectSafe: failed $r")
+                            logger.w("connectSafe: failed reason=$reason")
                             ok.complete(false)
                         }
                     }) ?: ok.complete(false)
                     ok.await()
-                } catch (e: Exception) { logger.e("connectSafe exc", e); false }
+                } catch (e: Exception) { false }
 
                 if (success) break
                 if (attempt < 3) {
-                    logger.d("connectSafe: retry (forceReset then wait 3s)")
                     try { manager?.cancelConnect(channel, null) } catch (_: Exception) { }
                     try { manager?.removeGroup(channel, null) } catch (_: Exception) { }
                     delay(3000)
                 }
             }
-            if (!success) logger.e("connectSafe: all attempts failed — Force Reset")
+            if (!success) logger.e("connectSafe: all failed")
         }
     }
 
     fun forceReset() {
-        logger.d("forceReset")
         scope.launch {
             try { manager?.cancelConnect(channel, null) } catch (_: Exception) { }
             delay(300)
-            try {
-                manager?.removeGroup(channel, object : WifiP2pManager.ActionListener {
-                    override fun onSuccess() = logger.d("forceReset: group removed")
-                    override fun onFailure(reason: Int) = logger.d("forceReset: no group (r=$reason)")
-                })
-            } catch (_: Exception) { }
+            try { manager?.removeGroup(channel, null) } catch (_: Exception) { }
         }
     }
 
@@ -149,18 +126,15 @@ class WifiDirectManager(
                 ?: deferred.complete(null)
         }
         val info = deferred.await()
-        logger.d("checkConnection: formed=${info?.groupFormed} isGO=${info?.isGroupOwner} goIp=${info?.groupOwnerAddress?.hostAddress}")
         if (info?.groupFormed == true) {
             val goIp = info.groupOwnerAddress?.hostAddress
             if (goIp != null) {
                 val myIp = waitForP2pIp()
                 if (myIp != null) {
-                    logger.d("GROUP FORMED: my=$myIp go=$goIp isGO=${info.isGroupOwner}")
                     onGroupFormed?.invoke(GroupState(myIp, goIp, info.isGroupOwner))
-                } else logger.w("no p2p IP")
+                }
             }
         } else {
-            logger.d("group not formed")
             onGroupLost?.invoke()
         }
     }

@@ -9,9 +9,9 @@ data class Message(
     val id: Long,
     val peerNodeId: String,
     val fromMe: Boolean,
-    val kind: String,          // "text" | "file"
-    val body: String,          // text или file_name
-    val filePath: String?,     // для kind=file
+    val kind: String,
+    val body: String,
+    val filePath: String?,
     val tsMs: Long
 )
 
@@ -32,15 +32,12 @@ class ChatStore(context: Context) {
 
     @Synchronized
     fun history(peerNodeId: String): List<Message> = cache[peerNodeId]?.toList() ?: emptyList()
+    
+    @Synchronized
+    fun allPeers(): List<String> = cache.keys.toList()
 
     @Synchronized
-    fun updateFilePath(peerNodeId: String, msgId: Long, path: String) {
-        cache[peerNodeId]?.firstOrNull { it.id == msgId }?.let { old ->
-            val idx = cache[peerNodeId]!!.indexOf(old)
-            cache[peerNodeId]!![idx] = old.copy(filePath = path)
-            save()
-        }
-    }
+    fun lastMessage(peerNodeId: String): Message? = cache[peerNodeId]?.lastOrNull()
 
     private fun load() {
         if (!file.exists()) return
@@ -52,15 +49,8 @@ class ChatStore(context: Context) {
                 val list = mutableListOf<Message>()
                 for (i in 0 until arr.length()) {
                     val o = arr.getJSONObject(i)
-                    list.add(Message(
-                        id = o.getLong("id"),
-                        peerNodeId = peer,
-                        fromMe = o.getBoolean("fromMe"),
-                        kind = o.getString("kind"),
-                        body = o.getString("body"),
-                        filePath = o.optString("filePath").takeIf { it.isNotEmpty() },
-                        tsMs = o.getLong("ts")
-                    ))
+                    list.add(Message(o.getLong("id"), peer, o.getBoolean("fromMe"),
+                        o.getString("kind"), o.getString("body"), o.optString("filePath").takeIf { it.isNotEmpty() }, o.getLong("ts")))
                     nextId = maxOf(nextId, o.getLong("id") + 1)
                 }
                 cache[peer] = list
@@ -70,21 +60,16 @@ class ChatStore(context: Context) {
 
     private fun save() {
         try {
-            val root = JSONObject()
-            val peers = JSONObject()
+            val root = JSONObject(); val peers = JSONObject()
             for ((peer, list) in cache) {
                 val arr = JSONArray()
-                for (m in list) {
-                    arr.put(JSONObject().apply {
-                        put("id", m.id); put("fromMe", m.fromMe)
-                        put("kind", m.kind); put("body", m.body)
-                        put("filePath", m.filePath ?: ""); put("ts", m.tsMs)
-                    })
-                }
+                for (m in list) arr.put(JSONObject().apply {
+                    put("id", m.id); put("fromMe", m.fromMe); put("kind", m.kind)
+                    put("body", m.body); put("filePath", m.filePath ?: ""); put("ts", m.tsMs)
+                })
                 peers.put(peer, arr)
             }
-            root.put("chats", peers)
-            file.writeText(root.toString())
+            root.put("chats", peers); file.writeText(root.toString())
         } catch (_: Exception) { }
     }
 }
