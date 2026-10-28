@@ -92,6 +92,8 @@ class MeshNode(
     }
     fun forceReset() = wifi.forceReset()
     
+    fun hasLastDevice(): Boolean = prefs.contains("last_mac")
+
     fun tryAutoReconnect() {
         val mac = prefs.getString("last_mac", null) ?: return
         logger.d("auto-reconnect to $mac")
