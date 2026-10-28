@@ -20,6 +20,8 @@ class MeshNode(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val wifi = WifiDirectManager(context, scope, logger)
     private val udp = UdpMeshTransport(scope, ::onUdpPacket, logger)
+    private val lanDiscovery = LanDiscovery(context, myId, scope, logger)
+    @Volatile private var lanMode = false
 
     val chatStore = ChatStore(context)
     val contactsStore = ContactsStore(context)
@@ -84,7 +86,7 @@ class MeshNode(
             stopPingLoop(); helloJob?.cancel(); udp.stop()
             onGroupLost?.invoke()
         }
-        wifi.start()
+        startLanDiscovery()
     }
 
     fun discover() = wifi.discover()
@@ -105,6 +107,12 @@ class MeshNode(
     }
     
     fun currentPeerIp(): String? = peerIp
+    fun isLanMode(): Boolean = lanMode
+    fun currentMode(): String = when {
+        myIp == null -> "idle"
+        lanMode -> "LAN"
+        else -> "P2P"
+    }
     fun currentPeerId(): String? = peerNodeId
     fun myIp(): String? = myIp
     fun isInGroup(): Boolean = myIp != null && udp.isBound()
@@ -280,6 +288,56 @@ class MeshNode(
 
     fun close() {
         stopCallLoops(); stopPingLoop(); helloJob?.cancel(); fileTransfer.close()
+        lanDiscovery.stop()
         wifi.stop(); udp.stop(); scope.cancel()
     }
+
+    private fun startLanDiscovery() {
+        val localIp = lanDiscovery.getLocalIp()
+        if (localIp == null) {
+            logger.d("[Mesh] no LAN IP → straight to P2P")
+            startP2PFallback()
+            return
+        }
+        logger.d("[Mesh] LAN IP=$localIp, broadcasting...")
+        lanDiscovery.onPeerFound = { peerId, peerLanIp ->
+            if (lanMode || myIp != null) return@onPeerFound  // уже подключились
+            val myLan = lanDiscovery.getLocalIp() ?: return@onPeerFound
+            logger.d("[Mesh] LAN peer found: $peerLanIp ($peerId)")
+            myIp = myLan
+            peerIp = peerLanIp
+            peerNodeId = peerId.toString()
+            lanMode = true
+            udp.start(myLan)
+            fileTransfer.startServer(myLan)
+            onGroupFormed?.invoke(myLan, peerLanIp, false)
+        }
+        lanDiscovery.start()
+        lanDiscovery.discover()
+        // Fallback на P2P если за 6 сек никого
+        scope.launch {
+            delay(6000)
+            if (myIp == null) {
+                logger.d("[Mesh] LAN discovery timeout → fallback to P2P")
+                lanDiscovery.stop()
+                startP2PFallback()
+            }
+        }
+    }
+
+    private fun startP2PFallback() {
+        if (myIp != null) return  // уже подключились через LAN
+        logger.d("[Mesh] starting WiFi Direct")
+        wifi.start()
+    }
+
+    fun retryLanDiscovery() {
+        logger.d("[Mesh] retryLanDiscovery")
+        lanDiscovery.stop()
+        lanMode = false
+        myIp = null; peerIp = null; peerNodeId = null
+        startLanDiscovery()
+    }
+
+
 }

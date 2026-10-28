@@ -38,6 +38,7 @@ class SelfTestRunner(private val context: Context) {
         add(check("Разрешения", ::checkPermissions))
         add(check("FGS-сервис", ::checkFgs))
         add(check("Wi-Fi P2P драйвер", ::checkWifiP2p))
+        add(check("LAN IP", ::checkLanIp))
         add(check("UDP bind 47820", ::checkUdpPort))
         add(check("TCP bind 47821", ::checkTcpPort))
         add(check("Микрофон (AudioRecord)", ::checkAudioRecord))
@@ -230,4 +231,24 @@ class SelfTestRunner(private val context: Context) {
         return if (ZvonNotificationListener.connected) true to "подключён (получено ${ZvonNotificationListener.receivedCount})"
         else false to "не подключён — Настройки → Уведомления → Доступ к уведомлениям"
     }
+
+    private fun checkLanIp(): Pair<Boolean, String> {
+        val node = ZvonController.meshNode ?: return false to "meshNode null"
+        val mode = node.currentMode()
+        val lanIp = try {
+            for (intf in java.net.NetworkInterface.getNetworkInterfaces()) {
+                if (!intf.isUp || intf.isLoopback) continue
+                if (!intf.name.startsWith("wlan")) continue
+                for (ia in intf.inetAddresses) {
+                    if (ia is java.net.Inet4Address && !ia.isLoopbackAddress) return@for_intf ia.hostAddress
+                }
+            }
+            null
+        } catch (_: Exception) { null }
+        return if (lanIp != null) true to "$lanIp (mode=$mode)"
+        else if (mode == "P2P") true to "нет LAN IP, но режим P2P — ок"
+        else false to "нет LAN IP"
+    }
+
+
 }

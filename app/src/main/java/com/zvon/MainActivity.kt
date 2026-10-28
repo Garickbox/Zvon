@@ -257,8 +257,10 @@ class MainActivity : AppCompatActivity() {
 
     private fun renderConnectedPeer(peerIp: String, peerId: String?, isGo: Boolean) {
         peerList.removeAllViews()
+        val mode = ZvonController.meshNode?.currentMode() ?: "?"
+        val modeLabel = if (mode == "LAN") "🌐 LAN (через роутер)" else if (mode == "P2P") "📡 P2P (Wi-Fi Direct)" else mode
         peerList.addView(TextView(this).apply {
-            text = "✅ Соединено\nя: ${ZvonController.meshNode?.myIp() ?: "?"}\nпир: $peerIp\n${if (isGo) "(Group Owner)" else "(Client)"}"
+            text = "✅ $modeLabel\nя: ${ZvonController.meshNode?.myIp() ?: "?"}\nпир: $peerIp"
             setTextColor(0xFFAAAAAA.toInt()); textSize = 13f
         })
         peerList.addView(Button(this).apply {

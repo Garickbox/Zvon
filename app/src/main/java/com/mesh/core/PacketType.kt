@@ -11,6 +11,8 @@ enum class PacketType(val id: Byte) {
     FILE_OFFER(0x09),
     FILE_ACCEPT(0x0A),
     FILE_DECLINE(0x0B),
+    DISCOVER(0x10),
+    HERE(0x11),
     TEST(0x20);
 
     companion object {
