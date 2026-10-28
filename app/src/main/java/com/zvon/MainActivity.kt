@@ -58,6 +58,7 @@ class MainActivity : AppCompatActivity() {
     private var callStartMs = 0L
     private var durationJob: Job? = null
     private var showingChats = false
+    private var isRinging = false
     private var currentFileDialog: AlertDialog? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -102,9 +103,9 @@ class MainActivity : AppCompatActivity() {
         meshNode.onPeersChanged = { peers -> runOnUiThread { if (!showingChats) renderPeers(peers) } }
         meshNode.onGroupFormed = { myIp, peerIp, isGo -> runOnUiThread { onGroupReady(myIp, peerIp, isGo) } }
         meshNode.onGroupLost = { runOnUiThread { statusText.text = "Группа потеряна"; if (showingChats) renderChats() } }
-        meshNode.onIncomingCall = { ip -> runOnUiThread { showIncomingDialog(ip) } }
-        meshNode.onCallConnected = { runOnUiThread { stopRingtone(); showInCallUi("Соединено"); startDurationTimer() } }
-        meshNode.onCallEnded = { reason -> runOnUiThread { stopRingtone(); hideCallUi(reason) } }
+        meshNode.onIncomingCall = { ip -> runOnUiThread { handleIncomingCall(ip) } }
+        meshNode.onCallConnected = { runOnUiThread { dismissRinging(); showInCallUi("Соединено"); startDurationTimer() } }
+        meshNode.onCallEnded = { reason -> runOnUiThread { dismissRinging(); hideCallUi(reason) } }
         meshNode.onVoiceReceived = { seq, data -> pipeline?.onNetworkVoicePacket(seq, data) }
         meshNode.onContactsChanged = { runOnUiThread { if (showingChats) renderChats() } }
         
@@ -332,6 +333,70 @@ class MainActivity : AppCompatActivity() {
                 type = "text/plain"; putExtra(Intent.EXTRA_STREAM, uri); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }, "Поделиться логом"))
         } catch (e: Exception) { Toast.makeText(this, "Ошибка: ${e.message}", Toast.LENGTH_LONG).show() }
+    }
+
+
+    private fun handleIncomingCall(ip: String) {
+        // FSI-уведомление — работает даже когда приложение в фоне
+        NotificationHelper.showIncomingCallNotification(this, ip)
+        // Прямой запуск Activity (если приложение в foreground — мгновенно;
+        // если в background — система поднимет через FSI или user тапнет notification)
+        try {
+            startActivity(Intent(this, IncomingCallActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                putExtra(IncomingCallActivity.EXTRA_IP, ip)
+            })
+        } catch (_: Exception) { }
+        // Рингтон с таймаутом 60 сек
+        playRingtone()
+        isRinging = true
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+            if (isRinging) {
+                InAppLogger.write('I', "Main", "ringtone timeout → decline $ip")
+                stopRingtone()
+                NotificationHelper.cancelIncomingCall(this)
+                meshNode.declineCall(ip)
+                isRinging = false
+            }
+        }, 60_000L)
+    }
+
+    private fun dismissRinging() {
+        if (!isRinging) return
+        isRinging = false
+        stopRingtone()
+        NotificationHelper.cancelIncomingCall(this)
+    }
+
+
+    private fun requestCallPermissions() {
+        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+        val batteryOk = pm.isIgnoringBatteryOptimizations(packageName)
+        val overlayOk = Settings.canDrawOverlays(this)
+        val fsiOk = if (Build.VERSION.SDK_INT >= 34) {
+            (getSystemService(NotificationManager::class.java)).canUseFullScreenIntent()
+        } else true
+
+        val msg = StringBuilder()
+        if (!fsiOk) msg.append("• Полноэкранные уведомления (Android 14+)\n")
+        if (!overlayOk) msg.append("• Показ поверх других приложений (MIUI)\n")
+        if (!batteryOk) msg.append("• Игнорирование батареи\n")
+        if (msg.isEmpty()) { Toast.makeText(this, "Все разрешения выданы", Toast.LENGTH_SHORT).show(); return }
+
+        AlertDialog.Builder(this)
+            .setTitle("Разрешения для звонков")
+            .setMessage("Не выданы:\n$msg")
+            .setPositiveButton("Открыть") { _, _ ->
+                if (!fsiOk && Build.VERSION.SDK_INT >= 34) {
+                    try { startActivity(Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT, Uri.parse("package:$packageName"))) } catch (_: Exception) {}
+                } else if (!overlayOk) {
+                    try { startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName"))) } catch (_: Exception) {}
+                } else if (!batteryOk) {
+                    try { startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:$packageName"))) } catch (_: Exception) {}
+                }
+            }
+            .setNegativeButton("Позже", null)
+            .show()
     }
 
     private fun requestBatteryExemption() {

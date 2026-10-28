@@ -73,6 +73,15 @@ class ChatActivity : AppCompatActivity() {
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
         })
         header.addView(Button(this).apply {
+            text = "📞"
+            setOnClickListener {
+                startActivity(Intent(this@ChatActivity, MainActivity::class.java).apply {
+                    flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                })
+                finish()
+            }
+        })
+        header.addView(Button(this).apply {
             text = "📎"
             setOnClickListener {
                 val i = Intent(Intent.ACTION_GET_CONTENT).apply { type = "*/*" }
