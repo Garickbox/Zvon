@@ -325,7 +325,20 @@ class MeshNode(
     fun close() {
         stopCallLoops(); stopPingLoop(); helloJob?.cancel(); fileTransfer.close()
         lanDiscovery.stop()
-        try { ownedPipeline?.stop() } catch (_: Exception) {}
+        // stop() — suspend, но close() не suspend. Используем runBlocking с таймаутом.
+        // close() вызывается только при shutdown → 1-2 сек задержки приемлемо.
+        try {
+            val p = ownedPipeline
+            if (p != null) {
+                kotlinx.coroutines.runBlocking {
+                    kotlinx.coroutines.withTimeoutOrNull(1500) {
+                        try { p.stop() } catch (e: Exception) { logger.w("[Mesh] close: stop failed: ${e.message}") }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            logger.w("[Mesh] close: pipeline stop exception: ${e.message}")
+        }
         ownedPipeline = null
         wifi.stop(); udp.stop(); scope.cancel()
     }
