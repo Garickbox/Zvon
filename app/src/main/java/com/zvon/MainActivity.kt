@@ -72,6 +72,7 @@ class MainActivity : AppCompatActivity() {
         btnDiscover = findViewById(R.id.btnDiscover)
         btnForceReset = findViewById(R.id.btnForceReset)
         btnShareLog = findViewById(R.id.btnShareLog)
+        findViewById<Button>(R.id.btnCheckUpdate)?.setOnClickListener { manualCheckUpdate() }
         findViewById<Button>(R.id.btnFiles).setOnClickListener {
             startActivity(Intent(this, FilesActivity::class.java))
         }
