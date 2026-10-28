@@ -12,7 +12,7 @@ android {
     }
     defaultConfig {
         applicationId "com.zvon"; minSdk 26; targetSdk 34
-        versionCode = (System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1)
+        versionCode = ((System.getenv("GITHUB_RUN_NUMBER") ?: "1") as Integer)
         versionName "0.1-mvp"
     }
     buildTypes {
