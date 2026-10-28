@@ -71,8 +71,7 @@ class ChatActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        val activeId = ZvonController.meshNode?.currentPeerId() ?: peerId
-        ZvonController.setActiveChat(activeId)
+        ZvonController.setActiveChat(peerId)
         reload()
     }
 
@@ -104,9 +103,7 @@ class ChatActivity : AppCompatActivity() {
                     Toast.makeText(this@ChatActivity, "Нет соединения", Toast.LENGTH_SHORT).show()
                     return@setOnClickListener
                 }
-                if (ZvonController.state.value.callState == CallState.IDLE) {
-                    ZvonController.meshNode?.call(peerIp)
-                }
+                ZvonController.meshNode?.call(peerIp)
                 startActivity(Intent(this@ChatActivity, MainActivity::class.java).apply {
                     flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
                 })

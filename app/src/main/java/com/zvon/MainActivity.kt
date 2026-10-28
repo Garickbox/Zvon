@@ -203,7 +203,7 @@ class MainActivity : AppCompatActivity() {
     private fun autoDiscoverIfEnabled() {
         val prefs = getSharedPreferences("zvon", MODE_PRIVATE)
         if (!prefs.getBoolean("auto_connect", true)) return
-        if (ZvonController.state.value.peerIp != null) return
+        if (ZvonController.meshNode?.currentPeerIp() != null) return
         statusText.text = "Автопоиск…"
         ZvonController.meshNode?.discover()
     }
@@ -211,7 +211,7 @@ class MainActivity : AppCompatActivity() {
     private fun renderConnectedPeer(peerIp: String, peerId: String?, isGo: Boolean) {
         peerList.removeAllViews()
         peerList.addView(TextView(this).apply {
-            text = "✅ Соединено\nя: ${ZvonController.state.value.myIp ?: "?"}\nпир: $peerIp\n${if (isGo) "(Group Owner)" else "(Client)"}"
+            text = "✅ Соединено\nя: ${ZvonController.meshNode?.myIp() ?: "?"}\nпир: $peerIp\n${if (isGo) "(Group Owner)" else "(Client)"}"
             setTextColor(0xFFAAAAAA.toInt()); textSize = 13f
         })
         peerList.addView(Button(this).apply {

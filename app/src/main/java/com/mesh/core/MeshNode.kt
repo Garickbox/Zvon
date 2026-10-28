@@ -105,6 +105,7 @@ class MeshNode(
     
     fun currentPeerIp(): String? = peerIp
     fun currentPeerId(): String? = peerNodeId
+    fun myIp(): String? = myIp
     fun isInGroup(): Boolean = myIp != null && udp.isBound()
 
     fun call(ip: String) {
