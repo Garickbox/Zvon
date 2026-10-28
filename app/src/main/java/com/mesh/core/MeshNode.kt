@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.wifi.p2p.WifiP2pDevice
 import android.provider.Settings
 import kotlinx.coroutines.*
+import kotlinx.coroutines.Dispatchers
 import java.util.UUID
 
 enum class CallState { IDLE, CALLING, RINGING, IN_CALL }
@@ -64,6 +65,7 @@ class MeshNode(
     var onIncomingCall: ((peerIp: String) -> Unit)? = null
     var onCallConnected: (() -> Unit)? = null
     var onCallEnded: ((reason: String) -> Unit)? = null
+    var onPipelineChanged: ((com.mesh.core.AudioPipeline?) -> Unit)? = null
     var onVoiceReceived: ((seq: Long, opusData: ByteArray) -> Unit)? = null
     var onTextReceived: ((fromNodeId: String, text: String) -> Unit)? = null
     var onFileOffer: (suspend (id: String, name: String, size: Long, ip: String) -> Boolean)? = null
@@ -119,6 +121,7 @@ class MeshNode(
     
     fun currentPeerIp(): String? = peerIp
     fun isLanMode(): Boolean = lanMode
+    fun currentPipeline(): com.mesh.core.AudioPipeline? = ownedPipeline
     fun currentMode(): String = when {
         myIp == null -> "idle"
         lanMode -> "LAN"
@@ -285,7 +288,7 @@ class MeshNode(
                 if (callState != CallState.IDLE) {
                     callState = CallState.IDLE
                     stopCallLoops()
-                    scope.launch { stopOwnedPipeline("peer hung up") }
+                    stopOwnedPipeline("peer hung up") }
                     onCallEnded?.invoke("peer hung up")
                 }
             }
@@ -423,18 +426,20 @@ class MeshNode(
             )
             p.start(peerIp)
             ownedPipeline = p
-            ZvonController.pipeline = p
+            onPipelineChanged?.invoke(p)
         } catch (e: Exception) {
             logger.e("[Mesh] ensurePipeline failed", e)
         }
     }
 
-    private suspend fun stopOwnedPipeline(reason: String) {
+    private fun stopOwnedPipeline(reason: String) {
         val p = ownedPipeline ?: return
         ownedPipeline = null
-        ZvonController.pipeline = null
+        onPipelineChanged?.invoke(null)
         logger.d("[Mesh] stopping pipeline (reason=$reason)")
-        try { p.stop() } catch (e: Exception) { logger.w("[Mesh] pipeline.stop failed: ${e.message}") }
+        scope.launch(Dispatchers.IO) {
+            try { p.stop() } catch (e: Exception) { logger.w("[Mesh] pipeline.stop failed: ${e.message}") }
+        }
     }
 
 

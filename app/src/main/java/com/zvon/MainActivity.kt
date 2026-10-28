@@ -135,12 +135,17 @@ class MainActivity : AppCompatActivity() {
         meshNode.onGroupFormed = { myIp, peerIp, isGo -> runOnUiThread { onGroupReady(myIp, peerIp, isGo) } }
         meshNode.onGroupLost = { runOnUiThread { statusText.text = "Группа потеряна"; if (showingChats) renderChats() } }
         meshNode.onIncomingCall = { ip -> runOnUiThread { handleIncomingCall(ip) } }
+        meshNode.onPipelineChanged = { p ->
+            ZvonController.pipeline = p
+            InAppLogger.write('I', "Main", "pipeline changed: ${if (p != null) "created" else "null"}")
+        }
         meshNode.onCallConnected = { runOnUiThread {
             InAppLogger.write('I', "Main", "onCallConnected (UI only, pipeline=${ZvonController.pipeline != null})")
             showInCallUi("Соединено")
             startDurationTimer()
         } }
         meshNode.onCallEnded = { reason -> runOnUiThread {
+            ZvonController.pipeline = null
             hideCallUi(reason)
         } }
         
@@ -335,7 +340,7 @@ class MainActivity : AppCompatActivity() {
         AlertDialog.Builder(this).setTitle("Входящий звонок").setMessage("От $ip").setCancelable(false)
             .setPositiveButton("Принять") { _, _ ->
                 stopRingtone(); currentPeerIp = ip
-                startNetworkPipeline(ip); meshNode.acceptCall(ip); enterCallAudioMode()
+                 meshNode.acceptCall(ip); enterCallAudioMode()
                 showInCallUi("Соединено"); startDurationTimer()
             }
             .setNegativeButton("Отклонить") { _, _ -> stopRingtone(); meshNode.declineCall(ip) }.show()
