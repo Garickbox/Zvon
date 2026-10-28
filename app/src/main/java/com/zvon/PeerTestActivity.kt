@@ -80,10 +80,12 @@ class PeerTestActivity : AppCompatActivity() {
         addRow("   RTT min=${r.rttMin}мс avg=${r.rttAvg}мс max=${r.rttMax}мс")
         addRow("")
         val lossPct = (100 - r.voiceReceived) * 100.0 / 100
-        addRow("🎤 ГОЛОС")
+        val voiceOk = r.voiceReceived >= 80
+        val textOk = r.textReceived >= 9
+        addRow("🎤 ГОЛОС ${if (voiceOk) "✅" else "⚠️"}")
         addRow("   ${r.voiceReceived}/100 пакетов, потери ${String.format(Locale.US, "%.1f", lossPct)}%")
         addRow("")
-        addRow("💬 ТЕКСТ")
+        addRow("💬 ТЕКСТ ${if (textOk) "✅" else "⚠️"}")
         addRow("   ${r.textReceived}/10 сообщений, дублей ${r.textDups}, порядок ${if (r.textInOrder) "✓" else "✗"}")
     }
 

@@ -33,6 +33,8 @@ class PeerTestRunner(
 
     private val slaveVoiceCount = AtomicInteger(0)
     private val slaveTextOrder = mutableListOf<String>()
+    @Volatile private var lastVoiceReqAt = 0L
+    @Volatile private var lastTextReqAt = 0L
 
     fun onIncoming(fromIp: String, payload: String) {
         val p = TestPacket.parse(payload) ?: return
@@ -52,15 +54,34 @@ class PeerTestRunner(
             "ping" -> sendTest(fromIp, p.id, "pong", p.seq)
             "pong" -> pongs[p.seq] = System.currentTimeMillis()
             "voice" -> slaveVoiceCount.incrementAndGet()
-            "voice_done_req" -> sendTest(fromIp, p.id, "voice_done", 0, slaveVoiceCount.get().toString())
+            "voice_done_req" -> {
+                // Дебаунс: отвечаем только на первый req в окне 300ms
+                val now = System.currentTimeMillis()
+                if (now - lastVoiceReqAt < 300) return
+                lastVoiceReqAt = now
+                // Даём voice пакетам догрести
+                scope.launch {
+                    delay(150)
+                    val count = slaveVoiceCount.get()
+                    InAppLogger.write('I', "PeerTest", "voice_done_req → reply $count")
+                    sendTest(fromIp, p.id, "voice_done", 0, count.toString())
+                }
+            }
             "text" -> synchronized(slaveTextOrder) { slaveTextOrder.add(p.data ?: "") }
             "text_done_req" -> {
-                val json = JSONObject().apply {
-                    put("received", slaveTextOrder.size)
-                    put("inOrder", checkOrder())
-                    put("dups", slaveTextOrder.size - slaveTextOrder.toSet().size)
-                }.toString()
-                sendTest(fromIp, p.id, "text_done", 0, json)
+                val now = System.currentTimeMillis()
+                if (now - lastTextReqAt < 300) return
+                lastTextReqAt = now
+                scope.launch {
+                    delay(150)
+                    val json = JSONObject().apply {
+                        put("received", slaveTextOrder.size)
+                        put("inOrder", checkOrder())
+                        put("dups", slaveTextOrder.size - slaveTextOrder.toSet().size)
+                    }.toString()
+                    InAppLogger.write('I', "PeerTest", "text_done_req → reply ${slaveTextOrder.size}")
+                    sendTest(fromIp, p.id, "text_done", 0, json)
+                }
             }
             "voice_done" -> if (masterMode && !voiceDone.isCompleted) voiceDone.complete(p.data?.toIntOrNull() ?: -1)
             "text_done" -> if (masterMode && !textDone.isCompleted) textDone.complete(p.data ?: "{}")
@@ -74,7 +95,6 @@ class PeerTestRunner(
 
     private fun handleInvite(fromIp: String, p: TestPacket) {
         InAppLogger.write('I', "PeerTest", "invite from $fromIp id=${p.id} master=$masterMode")
-        // Race-fix: если мы уже master — отказываем
         if (masterMode) {
             InAppLogger.write('W', "PeerTest", "already master → decline")
             sendTest(fromIp, p.id, "decline")
@@ -95,6 +115,8 @@ class PeerTestRunner(
                 InAppLogger.write('I', "PeerTest", "user accepted → send accept")
                 synchronized(slaveTextOrder) { slaveTextOrder.clear() }
                 slaveVoiceCount.set(0)
+                lastVoiceReqAt = 0
+                lastTextReqAt = 0
                 sendTest(fromIp, p.id, "accept")
             } else {
                 InAppLogger.write('I', "PeerTest", "user declined / timeout → send decline")
@@ -141,26 +163,58 @@ class PeerTestRunner(
             }
             if (rtts.size < 3) return@coroutineScope Report(false, 0, 0, 0, 0, 0, 0, 0, 0, false, "PONG: ${rtts.size}/5")
 
+            // ---- VOICE: 100 пакетов с задержкой ----
             onProgress?.invoke("Голос: 100 пакетов…")
-            for (i in 1..100L) sendTest(peerIp, testId, "voice", i, "V$i")
-            sendTest(peerIp, testId, "voice_done_req")
-            val vRecv = withTimeoutOrNull(5000) { voiceDone.await() } ?: -1
-            if (vRecv < 0) return@coroutineScope Report(false, rtts.min(), rtts.average().toLong(), rtts.max(), 100, 0, 0, 0, 0, false, "Voice: нет ответа")
+            for (i in 1..100L) {
+                sendTest(peerIp, testId, "voice", i, "V$i")
+                if (i % 10 == 0L) delay(30) else delay(3)  // ~400ms на 100 пакетов
+            }
+            delay(300)  // даём последним пакетам догрести
 
+            // ---- voice_done_req с retry ----
+            var vRecv = -1
+            for (attempt in 1..3) {
+                InAppLogger.write('D', "PeerTest", "voice_done_req attempt $attempt")
+                sendTest(peerIp, testId, "voice_done_req")
+                val r = withTimeoutOrNull(2500) { voiceDone.await() }
+                if (r != null) { vRecv = r; break }
+                InAppLogger.write('W', "PeerTest", "voice_done timeout attempt $attempt")
+            }
+            if (vRecv < 0) vRecv = 0
+            InAppLogger.write('I', "PeerTest", "voice result: $vRecv/100")
+
+            // ---- TEXT: 10 сообщений ----
             onProgress?.invoke("Текст: 10 сообщений…")
             for (i in 1..10L) { sendTest(peerIp, testId, "text", i, "MSG$i"); delay(30) }
-            sendTest(peerIp, testId, "text_done_req")
-            val tJson = withTimeoutOrNull(5000) { textDone.await() }
-                ?: return@coroutineScope Report(false, rtts.min(), rtts.average().toLong(), rtts.max(), 100, vRecv, 10, 0, 0, false, "Text: нет ответа")
-            val tObj = JSONObject(tJson)
+            delay(200)
+
+            var tJson: String? = null
+            for (attempt in 1..3) {
+                InAppLogger.write('D', "PeerTest", "text_done_req attempt $attempt")
+                sendTest(peerIp, testId, "text_done_req")
+                val r = withTimeoutOrNull(2500) { textDone.await() }
+                if (r != null) { tJson = r; break }
+                InAppLogger.write('W', "PeerTest", "text_done timeout attempt $attempt")
+            }
+
+            val tObj = if (tJson != null) JSONObject(tJson) else JSONObject()
+            val tReceived = tObj.optInt("received", 0)
+            val tDups = tObj.optInt("dups", 0)
+            val tInOrder = tObj.optBoolean("inOrder", false)
+
+            // Гибкий threshold: голос ≥80% = OK, текст ≥9/10 = OK
+            val voiceOk = vRecv >= 80
+            val textOk = tReceived >= 9
+            val success = voiceOk && textOk
 
             onProgress?.invoke("Готово")
             Report(
-                success = true,
+                success = success,
                 rttMin = rtts.min(), rttAvg = rtts.average().toLong(), rttMax = rtts.max(),
                 voiceSent = 100, voiceReceived = vRecv,
-                textSent = 10, textReceived = tObj.optInt("received", -1),
-                textDups = tObj.optInt("dups", 0), textInOrder = tObj.optBoolean("inOrder", false)
+                textSent = 10, textReceived = tReceived,
+                textDups = tDups, textInOrder = tInOrder,
+                error = if (!success) "voice=$vRecv/100 text=$tReceived/10" else null
             )
         } catch (e: Exception) {
             Report(false, 0, 0, 0, 0, 0, 0, 0, 0, false, "Exception: ${e.message}")
