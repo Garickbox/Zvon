@@ -74,6 +74,9 @@ class MainActivity : AppCompatActivity() {
         findViewById<Button>(R.id.btnFiles).setOnClickListener {
             startActivity(Intent(this, FilesActivity::class.java))
         }
+        findViewById<Button>(R.id.btnSelfTest).setOnClickListener {
+            startActivity(Intent(this, SelfTestActivity::class.java))
+        }
         btnChats = findViewById(R.id.btnChats)
         discoveryView = findViewById(R.id.discoveryView)
         callView = findViewById(R.id.callView)

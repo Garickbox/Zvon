@@ -2,4 +2,5 @@
 <paths>
     <external-files-path name="logs" path="logs/" />
     <external-path name="downloads_zvon" path="Download/Zvon/" />
+    <cache-path name="cache" path="." />
 </paths>
