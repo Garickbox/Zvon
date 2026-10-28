@@ -64,4 +64,33 @@ object ZvonController {
         val cb = onFileOfferChanged ?: return
         android.os.Handler(android.os.Looper.getMainLooper()).post { cb(p) }
     }
+
+    data class PendingPeerTestInvite(
+        val id: String,
+        val fromIp: String,
+        val decision: CompletableDeferred<Boolean>
+    )
+    @Volatile var pendingPeerTestInvite: PendingPeerTestInvite? = null
+    @Volatile var onPeerTestInviteChanged: ((PendingPeerTestInvite?) -> Unit)? = null
+
+    suspend fun awaitPeerTestDecision(id: String, fromIp: String): Boolean {
+        val pending = PendingPeerTestInvite(id, fromIp, CompletableDeferred())
+        pendingPeerTestInvite = pending
+        try {
+            notifyPeerTest(pending)
+            return pending.decision.await()
+        } finally {
+            pendingPeerTestInvite = null
+            notifyPeerTest(null)
+        }
+    }
+
+    fun resolvePeerTest(accept: Boolean) {
+        pendingPeerTestInvite?.decision?.complete(accept)
+    }
+
+    private fun notifyPeerTest(p: PendingPeerTestInvite?) {
+        val cb = onPeerTestInviteChanged ?: return
+        android.os.Handler(android.os.Looper.getMainLooper()).post { cb(p) }
+    }
 }

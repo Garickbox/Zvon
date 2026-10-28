@@ -60,6 +60,7 @@ class MainActivity : AppCompatActivity() {
     private var showingChats = false
     private var isRinging = false
     private var currentFileDialog: AlertDialog? = null
+    private var currentPeerTestDialog: AlertDialog? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -114,6 +115,7 @@ class MainActivity : AppCompatActivity() {
         wireUi()
         // Если Activity пересоздана посреди незавершённого file-offer — показать снова
         ZvonController.pendingFileOffer?.let { p -> ZvonController.onFileOfferChanged?.invoke(p) }
+        ZvonController.pendingPeerTestInvite?.let { p -> ZvonController.onPeerTestInviteChanged?.invoke(p) }
     }
 
     private fun setupMesh() {
@@ -140,7 +142,9 @@ class MainActivity : AppCompatActivity() {
         meshNode.onCallEnded = { reason -> runOnUiThread { dismissRinging(); hideCallUi(reason) } }
         meshNode.onVoiceReceived = { seq, data -> pipeline?.onNetworkVoicePacket(seq, data) }
         meshNode.onContactsChanged = { runOnUiThread { if (showingChats) renderChats() } }
-        ZvonController.peerTestRunner = com.mesh.core.PeerTestRunner(meshNode)
+        ZvonController.peerTestRunner = com.mesh.core.PeerTestRunner(meshNode).also { runner ->
+            runner.onIncomingInvite = { ip, id -> ZvonController.awaitPeerTestDecision(id, ip) }
+        }
         meshNode.onTestPacket = { fromIp, payload -> ZvonController.peerTestRunner?.onIncoming(fromIp, payload) }
         
         meshNode.onTextReceived = { fromId, text -> runOnUiThread {
@@ -152,6 +156,22 @@ class MainActivity : AppCompatActivity() {
         meshNode.onFileOffer = { id, name, size, ip ->
             ZvonController.awaitFileDecision(id, name, size, ip)
         }
+        
+        ZvonController.onPeerTestInviteChanged = { pending -> runOnUiThread {
+            if (pending == null) {
+                try { currentPeerTestDialog?.dismiss() } catch (_: Exception) { }
+                currentPeerTestDialog = null
+            } else if (currentPeerTestDialog?.isShowing != true) {
+                currentPeerTestDialog = AlertDialog.Builder(this)
+                    .setTitle("🧪 Сосед хочет прогнать тест")
+                    .setMessage("От ${pending.fromIp}\n\nБудет проверено: RTT, потери голосовых пакетов, доставка текста. ~15 секунд.")
+                    .setCancelable(false)
+                    .setPositiveButton("Принять") { _, _ -> ZvonController.resolvePeerTest(true) }
+                    .setNegativeButton("Отклонить") { _, _ -> ZvonController.resolvePeerTest(false) }
+                    .show()
+            }
+        } }
+
         ZvonController.onFileOfferChanged = { pending -> runOnUiThread {
             if (pending == null) {
                 try { currentFileDialog?.dismiss() } catch (_: Exception) { }
@@ -550,6 +570,9 @@ class MainActivity : AppCompatActivity() {
         try { currentFileDialog?.dismiss() } catch (_: Exception) { }
         currentFileDialog = null
         ZvonController.onFileOfferChanged = null
+        ZvonController.onPeerTestInviteChanged = null
+        try { currentPeerTestDialog?.dismiss() } catch (_: Exception) { }
+        currentPeerTestDialog = null
         // NB: pending deferred НЕ отменяем — meshNode.close() ниже отменит
         // MeshNode-scope и awaitFileDecision уйдёт в finally. Если Activity
         // пересоздаётся — новый onCreate подхватит pending через replay.

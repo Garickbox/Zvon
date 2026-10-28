@@ -41,6 +41,11 @@ class FileTransferManager(
                         val sock = ss.accept()
                         if (serverStopped) { runCatching { sock.close() }; break }
                         launch(Dispatchers.IO) { handleIncoming(sock) }
+                    } catch (e: java.net.SocketException) {
+                        // SocketException на close — норма, выходим молча
+                        if (serverStopped || !isActive || ss.isClosed) break
+                        if (e.message?.contains("closed", ignoreCase = true) == true) break
+                        logger.w("accept: ${e.message}")
                     } catch (e: Exception) {
                         if (serverStopped || !isActive || ss.isClosed) break
                         logger.w("accept: ${e.message}")

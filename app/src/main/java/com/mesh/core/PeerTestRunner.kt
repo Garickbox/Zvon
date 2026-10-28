@@ -9,6 +9,8 @@ import java.util.concurrent.atomic.AtomicInteger
 class PeerTestRunner(
     private val mesh: MeshNode,
     var onProgress: ((String) -> Unit)? = null
+    var onIncomingInvite: (suspend (fromIp: String, id: String) -> Boolean)? = null
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 ) {
     data class Report(
         val success: Boolean,
@@ -66,10 +68,34 @@ class PeerTestRunner(
     }
 
     private fun handleInvite(fromIp: String, p: TestPacket) {
-        InAppLogger.write('I', "PeerTest", "invite from $fromIp id=${p.id} → auto-accept")
-        synchronized(slaveTextOrder) { slaveTextOrder.clear() }
-        slaveVoiceCount.set(0)
-        sendTest(fromIp, p.id, "accept")
+        InAppLogger.write('I', "PeerTest", "invite from $fromIp id=${p.id} master=$masterMode")
+        // Race-fix: если мы уже master — отказываем, не пытаемся стать slave
+        if (masterMode) {
+            InAppLogger.write('W', "PeerTest", "already master → decline")
+            sendTest(fromIp, p.id, "decline")
+            return
+        }
+        scope.launch {
+            val accepted = try {
+                withTimeoutOrNull(60_000) {
+                    onIncomingInvite?.invoke(fromIp, p.id) ?: false
+                } ?: false
+            } catch (e: CancellationException) {
+                false
+            } catch (e: Exception) {
+                InAppLogger.write('E', "PeerTest", "onIncomingInvite failed", e)
+                false
+            }
+            if (accepted) {
+                InAppLogger.write('I', "PeerTest", "user accepted → send accept")
+                synchronized(slaveTextOrder) { slaveTextOrder.clear() }
+                slaveVoiceCount.set(0)
+                sendTest(fromIp, p.id, "accept")
+            } else {
+                InAppLogger.write('I', "PeerTest", "user declined / timeout → send decline")
+                sendTest(fromIp, p.id, "decline")
+            }
+        }
     }
 
     private fun sendTest(ip: String, id: String, type: String, seq: Long = 0L, data: String? = null) {
