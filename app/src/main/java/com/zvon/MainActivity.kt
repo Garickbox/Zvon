@@ -136,30 +136,12 @@ class MainActivity : AppCompatActivity() {
         meshNode.onGroupLost = { runOnUiThread { statusText.text = "Группа потеряна"; if (showingChats) renderChats() } }
         meshNode.onIncomingCall = { ip -> runOnUiThread { handleIncomingCall(ip) } }
         meshNode.onCallConnected = { runOnUiThread {
-            if (pipeline == null) {
-                val ip = meshNode.currentPeerIp() ?: currentPeerIp
-                if (ip != null) {
-                    InAppLogger.write('I', "Main", "onCallConnected: pipeline NULL → create for $ip")
-                    startNetworkPipeline(ip)
-                } else {
-                    InAppLogger.write('E', "Main", "onCallConnected: no peerIp, audio will be silent!")
-                }
-            }
+            InAppLogger.write('I', "Main", "onCallConnected (UI only, pipeline=${ZvonController.pipeline != null})")
             showInCallUi("Соединено")
             startDurationTimer()
         } }
-        meshNode.onCallEnded = { reason -> runOnUiThread { dismissRinging(); hideCallUi(reason) } }
-        meshNode.onVoiceReceived = { seq, data -> pipeline?.onNetworkVoicePacket(seq, data) }
-        meshNode.onContactsChanged = { runOnUiThread { if (showingChats) renderChats() } }
-        ZvonController.peerTestRunner = com.mesh.core.PeerTestRunner(meshNode).also { runner ->
-            runner.onIncomingInvite = { ip, id -> ZvonController.awaitPeerTestDecision(id, ip) }
-        }
-        meshNode.onTestPacket = { fromIp, payload -> ZvonController.peerTestRunner?.onIncoming(fromIp, payload) }
-        
-        meshNode.onTextReceived = { fromId, text -> runOnUiThread {
-            meshNode.chatStore.history(fromId).lastOrNull()?.let { ZvonController.emitChatMessage(it) }
-            NotificationHelper.showMessage(this, fromId, text, meshNode.currentPeerIp() ?: "")
-            if (showingChats) renderChats()
+        meshNode.onCallEnded = { reason -> runOnUiThread {
+            hideCallUi(reason)
         } }
         
         meshNode.onFileOffer = { id, name, size, ip ->
@@ -343,7 +325,6 @@ class MainActivity : AppCompatActivity() {
     private fun callPeer(ip: String) {
         if (pipeline != null) return
         currentPeerIp = ip
-        startNetworkPipeline(ip)
         meshNode.call(ip)
         enterCallAudioMode()
         showInCallUi("Вызов…")
@@ -736,16 +717,6 @@ class MainActivity : AppCompatActivity() {
 
     private fun dismissRinging() { /* no-op */ }
 
-    private fun startNetworkPipeline(peerIp: String) {
-        MeshForegroundService.start(this, peerIp)
-        val p = com.mesh.core.AudioPipeline(
-            mode = com.mesh.core.PipelineMode.NETWORK,
-            voiceSender = { seq, data, ip -> meshNode.sendVoice(seq, data, ip) }
-        )
-        p.start(peerIp)
-        pipeline = p
-        ZvonController.pipeline = p
-    }
 
 
     private fun shutdownApp() {

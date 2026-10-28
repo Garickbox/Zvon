@@ -49,6 +49,7 @@ class MeshNode(
     @Volatile private var callState = CallState.IDLE
     @Volatile private var lastPacketAt = 0L
     @Volatile private var lastPongAt = 0L
+    @Volatile private var ownedPipeline: com.mesh.core.AudioPipeline? = null
     private val seenTextKeys = java.util.Collections.synchronizedSet(mutableSetOf<String>())
     private val helloRepliedTo = java.util.Collections.synchronizedSet(mutableSetOf<String>())
 
@@ -158,6 +159,7 @@ class MeshNode(
         stopCallLoops()
         scope.launch {
             if (ip != null) sendPacket(PacketType.CALL_BYE, ip, ByteArray(0))
+            stopOwnedPipeline("endCall")
             onCallEnded?.invoke("you hung up")
         }
     }
@@ -228,8 +230,13 @@ class MeshNode(
         watchdogJob = scope.launch {
             while (isActive && callState == CallState.IN_CALL) {
                 delay(1000)
-                if (System.currentTimeMillis() - lastPacketAt > 6000) {
-                    callState = CallState.IDLE; stopCallLoops(); onCallEnded?.invoke("connection lost"); break
+                if (System.currentTimeMillis() - lastPacketAt > 8000) {
+                    logger.w("[Mesh] watchdog: 8s no packets → endCall")
+                    callState = CallState.IDLE
+                    stopCallLoops()
+                    stopOwnedPipeline("watchdog")
+                    onCallEnded?.invoke("connection lost")
+                    break
                 }
             }
         }
@@ -274,7 +281,14 @@ class MeshNode(
                 else { sendPacket(PacketType.CALL_BYE, fromIp, ByteArray(0)) }
             }
             PacketType.CALL_ACCEPT -> { if (callState == CallState.CALLING) { callState = CallState.IN_CALL; startCallLoops(); onCallConnected?.invoke() } }
-            PacketType.CALL_BYE -> { if (callState != CallState.IDLE) { callState = CallState.IDLE; stopCallLoops(); onCallEnded?.invoke("peer hung up") } }
+            PacketType.CALL_BYE -> {
+                if (callState != CallState.IDLE) {
+                    callState = CallState.IDLE
+                    stopCallLoops()
+                    scope.launch { stopOwnedPipeline("peer hung up") }
+                    onCallEnded?.invoke("peer hung up")
+                }
+            }
             PacketType.VOICE -> { if (callState == CallState.IN_CALL) { VoicePayload.decode(pkt.payload)?.let { onVoiceReceived?.invoke(it.seq, it.opusData) } } }
             PacketType.TEST -> {
                 syncIp()
@@ -308,6 +322,8 @@ class MeshNode(
     fun close() {
         stopCallLoops(); stopPingLoop(); helloJob?.cancel(); fileTransfer.close()
         lanDiscovery.stop()
+        try { ownedPipeline?.stop() } catch (_: Exception) {}
+        ownedPipeline = null
         wifi.stop(); udp.stop(); scope.cancel()
     }
 
@@ -389,6 +405,36 @@ class MeshNode(
             onContactsChanged?.invoke()
             logger.d("[Mesh] peer name saved: ${peerId.toString().take(8)} → $name")
         } catch (e: Exception) { logger.w("[Mesh] savePeerName failed: ${e.message}") }
+    }
+
+
+
+    private fun ensurePipeline(peerIp: String, reason: String) {
+        if (ownedPipeline != null) {
+            logger.d("[Mesh] pipeline already exists, reason=$reason")
+            return
+        }
+        logger.d("[Mesh] creating pipeline (reason=$reason, peer=$peerIp)")
+        try {
+            val p = com.mesh.core.AudioPipeline(
+                mode = com.mesh.core.PipelineMode.NETWORK,
+                logger = logger,
+                voiceSender = { seq, data, ip -> sendVoice(seq, data, ip) }
+            )
+            p.start(peerIp)
+            ownedPipeline = p
+            ZvonController.pipeline = p
+        } catch (e: Exception) {
+            logger.e("[Mesh] ensurePipeline failed", e)
+        }
+    }
+
+    private suspend fun stopOwnedPipeline(reason: String) {
+        val p = ownedPipeline ?: return
+        ownedPipeline = null
+        ZvonController.pipeline = null
+        logger.d("[Mesh] stopping pipeline (reason=$reason)")
+        try { p.stop() } catch (e: Exception) { logger.w("[Mesh] pipeline.stop failed: ${e.message}") }
     }
 
 
