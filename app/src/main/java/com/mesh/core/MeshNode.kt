@@ -245,23 +245,28 @@ class MeshNode(
     private suspend fun onUdpPacket(fromIp: String, data: ByteArray) {
         val pkt = MeshPacket.decode(data) ?: return
         lastPacketAt = System.currentTimeMillis()
-        if (peerIp == null || !isGroupOwner) peerIp = fromIp
+
+        // Вспомогательная функция: обновляет IP и дергает UI, если IP изменился
+        fun syncIp() {
+            if (peerIp != fromIp) {
+                peerIp = fromIp
+                lastKnownPeer = fromIp
+                if (isGroupOwner && myIp != null) {
+                    onGroupFormed?.invoke(myIp!!, fromIp, true)
+                }
+            }
+        }
 
         when (pkt.type) {
             PacketType.HELLO -> {
                 logger.d("← HELLO from $fromIp")
                 val wasNotConfirmed = !peerConfirmed
                 peerConfirmed = true
-                if (isGroupOwner) {
-                    if (peerIp != fromIp) {
-                        peerIp = fromIp
-                        lastKnownPeer = fromIp
-                        onGroupFormed?.invoke(myIp!!, fromIp, true)
-                    }
-                    if (wasNotConfirmed) {
-                        scope.launch { sendPacket(PacketType.HELLO, fromIp, ByteArray(0)) }
-                    }
-                } else {
+                syncIp() // Обновляет UI
+                
+                if (isGroupOwner && wasNotConfirmed) {
+                    scope.launch { sendPacket(PacketType.HELLO, fromIp, ByteArray(0)) }
+                } else if (!isGroupOwner) {
                     helloJob?.cancel()
                 }
                 val fromNode = pkt.sourceId.toString()
@@ -270,6 +275,7 @@ class MeshNode(
             }
             PacketType.KEEPALIVE -> {
                 lastPongAt = System.currentTimeMillis()
+                syncIp() // Страховка: если HELLO потерялся, KEEPALIVE восстановит UI
                 val fromNode = pkt.sourceId.toString()
                 contactsStore.markOnline(fromNode, true)
                 onContactsChanged?.invoke()
@@ -298,12 +304,14 @@ class MeshNode(
                 }
             }
             PacketType.VOICE -> {
+                syncIp() // Страховка для звонка
                 if (callState == CallState.IN_CALL) {
                     val vp = VoicePayload.decode(pkt.payload) ?: return
                     onVoiceReceived?.invoke(vp.seq, vp.opusData)
                 }
             }
             PacketType.TEXT -> {
+                syncIp() // Страховка для чата
                 val tp = TextPayload.decode(pkt.payload) ?: return
                 val fromNode = pkt.sourceId.toString()
                 chatStore.add(fromNode, Message(0, fromNode, false, "text", tp.text, null, System.currentTimeMillis()))
