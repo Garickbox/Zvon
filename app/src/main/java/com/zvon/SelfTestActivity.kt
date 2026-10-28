@@ -53,10 +53,18 @@ class SelfTestActivity : AppCompatActivity() {
                 }
             }
             val ok = all.count { it.ok }
-            val fail = all.size - ok
-            summary.text = if (fail == 0) "✅ Все $ok проверок пройдены"
-                            else "⚠️ $ok OK, $fail ошибок"
-            summary.setTextColor(if (fail == 0) 0xFF4FCA52.toInt() else 0xFFE53935.toInt())
+            val warn = all.count { !it.ok && it.isWarning }
+            val fail = all.size - ok - warn
+            summary.text = when {
+                fail == 0 && warn == 0 -> "✅ Все $ok проверок пройдены"
+                fail == 0 -> "✅ $ok OK, ⚠️ $warn предупреждений"
+                else -> "⚠️ $ok OK, ⚠️ $warn warn, ❌ $fail ошибок"
+            }
+            summary.setTextColor(when {
+                fail == 0 && warn == 0 -> 0xFF4FCA52.toInt()
+                fail == 0 -> 0xFFF5B700.toInt()
+                else -> 0xFFE53935.toInt()
+            })
         }
     }
 
@@ -71,8 +79,17 @@ class SelfTestActivity : AppCompatActivity() {
             ).apply { setMargins(0, 0, 0, 6) }
         }
         row.addView(TextView(this).apply {
-            text = "${if (r.ok) "✅" else "❌"} ${r.name}"
-            setTextColor(if (r.ok) 0xFFE1E9F0.toInt() else 0xFFE53935.toInt())
+            val icon = when {
+                r.isWarning && !r.ok -> "⚠️"
+                r.ok -> "✅"
+                else -> "❌"
+            }
+            text = "$icon ${r.name}"
+            setTextColor(when {
+                r.isWarning && !r.ok -> 0xFFF5B700.toInt()
+                r.ok -> 0xFFE1E9F0.toInt()
+                else -> 0xFFE53935.toInt()
+            })
             textSize = 14f
         })
         row.addView(TextView(this).apply {
