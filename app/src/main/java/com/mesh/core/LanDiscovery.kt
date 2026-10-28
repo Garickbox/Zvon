@@ -153,15 +153,40 @@ class LanDiscovery(
     }
 
     fun getLocalIp(): String? {
-        try {
-            for (intf in NetworkInterface.getNetworkInterfaces()) {
+        return try {
+            val ifaces = NetworkInterface.getNetworkInterfaces().toList()
+            for (intf in ifaces) {
                 if (!intf.isUp || intf.isLoopback) continue
-                if (!intf.name.startsWith("wlan")) continue
-                for (ia in intf.inetAddresses) {
-                    if (ia is Inet4Address && !ia.isLoopbackAddress) return ia.hostAddress
+                val name = intf.name
+                // Не фильтруем по wlan — на MIUI/HyperOS интерфейс может называться иначе
+                // Исключаем только заведомо не-LAN: мобильный интернет и P2P
+                if (name.startsWith("rmnet") || name.startsWith("ccmni") ||
+                    name.startsWith("p2p") || name.startsWith("dummy")) continue
+                for (ia in intf.inetAddresses.toList()) {
+                    if (ia is Inet4Address && !ia.isLoopbackAddress) {
+                        val ip = ia.hostAddress ?: continue
+                        // Отсеиваем link-local 169.254.x.x
+                        if (ip.startsWith("169.254.")) continue
+                        return ip
+                    }
                 }
             }
-        } catch (_: Exception) {}
-        return null
+            null
+        } catch (_: Exception) { null }
+    }
+
+    /** Для диагностики: перечислить все интерфейсы и их IP */
+    fun dumpInterfaces(): List<String> {
+        val out = mutableListOf<String>()
+        try {
+            for (intf in NetworkInterface.getNetworkInterfaces().toList()) {
+                val ips = intf.inetAddresses.toList().filterIsInstance<Inet4Address>()
+                    .filter { !it.isLoopbackAddress }
+                    .mapNotNull { it.hostAddress }
+                if (ips.isEmpty() && !intf.isUp) continue
+                out.add("${intf.name} up=${intf.isUp} loop=${intf.isLoopback} ip=${ips.joinToString(",")}")
+            }
+        } catch (e: Exception) { out.add("error: ${e.message}") }
+        return out
     }
 }

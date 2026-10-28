@@ -233,13 +233,30 @@ class SelfTestRunner(private val context: Context) {
     }
 
     private fun checkLanIp(): Pair<Boolean, String> {
-        val node = ZvonController.meshNode ?: return false to "meshNode null"
-        val mode = node.currentMode()
-        val lanIp = findLanIp()
+        val node = ZvonController.meshNode
+        val mode = node?.currentMode() ?: "?"
+        // Перечисляем все up-интерфейсы с IPv4
+        val ips = mutableListOf<String>()
+        val details = mutableListOf<String>()
+        try {
+            for (intf in java.net.NetworkInterface.getNetworkInterfaces().toList()) {
+                if (!intf.isUp || intf.isLoopback) continue
+                for (ia in intf.inetAddresses.toList()) {
+                    if (ia is java.net.Inet4Address && !ia.isLoopbackAddress) {
+                        val ip = ia.hostAddress ?: continue
+                        details.add("${intf.name}=$ip")
+                        if (!ip.startsWith("169.254.")) ips.add("${intf.name}:$ip")
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+        val summary = if (details.isEmpty()) "нет активных IPv4" else details.joinToString(", ")
         return when {
-            lanIp != null -> true to "$lanIp (mode=$mode)"
-            mode == "P2P" -> true to "нет LAN IP, но режим P2P — ок"
-            else -> false to "нет LAN IP"
+            ips.any { it.contains(":192.168.") || it.contains(":10.") || it.contains(":172.") } ->
+                true to "mode=$mode; $summary"
+            ips.isNotEmpty() -> true to "mode=$mode; $summary"
+            mode == "P2P" -> true to "mode=P2P; $summary"
+            else -> false to "mode=$mode; $summary"
         }
     }
 

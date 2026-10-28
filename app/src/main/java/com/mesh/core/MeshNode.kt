@@ -293,12 +293,53 @@ class MeshNode(
     }
 
     private fun startLanDiscovery() {
-        val localIp = lanDiscovery.getLocalIp()
-        if (localIp == null) {
-            logger.d("[Mesh] no LAN IP → straight to P2P")
-            startP2PFallback()
-            return
+        scope.launch {
+            // 5 попыток × 1 сек = 5 сек на "Wi-Fi успел подняться"
+            var localIp: String? = null
+            for (attempt in 1..5) {
+                localIp = lanDiscovery.getLocalIp()
+                if (localIp != null) {
+                    logger.d("[Mesh] LAN IP found on attempt $attempt: $localIp")
+                    break
+                }
+                logger.d("[Mesh] no LAN IP yet, attempt $attempt/5")
+                delay(1000)
+            }
+            if (localIp == null) {
+                logger.d("[Mesh] no LAN IP after 5s → straight to P2P")
+                // Дамп для диагностики в лог
+                lanDiscovery.dumpInterfaces().forEach { logger.d("[LAN-IF] $it") }
+                startP2PFallback()
+                return@launch
+            }
+
+            logger.d("[Mesh] LAN IP=$localIp, broadcasting...")
+            lanDiscovery.onPeerFound = { peerId, peerLanIp ->
+                if (!lanMode && myIp == null) {
+                    val myLan = lanDiscovery.getLocalIp()
+                    if (myLan != null) {
+                        logger.d("[Mesh] LAN peer found: $peerLanIp ($peerId)")
+                        myIp = myLan
+                        peerIp = peerLanIp
+                        peerNodeId = peerId.toString()
+                        lanMode = true
+                        udp.start(myLan)
+                        fileTransfer.startServer(myLan)
+                        onGroupFormed?.invoke(myLan, peerLanIp, false)
+                    }
+                }
+            }
+            lanDiscovery.start()
+            lanDiscovery.discover()
+            // Fallback если за 6 сек peer не найден
+            delay(6000)
+            if (myIp == null) {
+                logger.d("[Mesh] LAN discovery timeout → fallback to P2P")
+                lanDiscovery.stop()
+                startP2PFallback()
+            }
         }
+    }
         logger.d("[Mesh] LAN IP=$localIp, broadcasting...")
         lanDiscovery.onPeerFound = { peerId, peerLanIp ->
             if (!lanMode && myIp == null) {
