@@ -85,6 +85,10 @@ class SelfTestRunner(private val context: Context) {
     }
 
     private fun checkUdpPort(): Pair<Boolean, String> {
+        // Если мы уже в группе — UDP-сокет держит meshNode, это правильное поведение
+        if (ZvonController.meshNode?.isInGroup() == true) {
+            return true to "обслуживается meshNode (в группе)"
+        }
         return try {
             val s = DatagramSocket(null)
             s.reuseAddress = true
@@ -95,6 +99,18 @@ class SelfTestRunner(private val context: Context) {
     }
 
     private fun checkTcpPort(): Pair<Boolean, String> {
+        // Если в группе — порт держит FileTransferManager, пробуем подключиться (значит сервер жив)
+        if (ZvonController.meshNode?.isInGroup() == true) {
+            return try {
+                java.net.Socket().use { sock ->
+                    sock.connect(InetSocketAddress("127.0.0.1", 47821), 500)
+                    true to "сервер файлов слушает (в группе)"
+                }
+            } catch (e: Exception) {
+                false to "сервер файлов не отвечает: ${e.message}"
+            }
+        }
+        // Не в группе — проверяем bind
         return try {
             val s = ServerSocket()
             s.reuseAddress = true
