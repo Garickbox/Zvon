@@ -60,6 +60,7 @@ class MainActivity : AppCompatActivity() {
     private var callStartMs = 0L
     private var durationJob: Job? = null
     private var showingChats = false
+    private var currentFileDialog: AlertDialog? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -94,6 +95,8 @@ class MainActivity : AppCompatActivity() {
         maybeShowMiuiHint()
         setupMesh()
         wireUi()
+        // Если Activity пересоздана посреди незавершённого file-offer — показать снова
+        ZvonController.pendingFileOffer?.let { p -> ZvonController.onFileOfferChanged?.invoke(p) }
     }
 
     private fun setupMesh() {
@@ -112,20 +115,25 @@ class MainActivity : AppCompatActivity() {
             if (showingChats) renderChats()
         } }
         
-        meshNode.onFileOffer = { id, name, size, _ ->
-            suspendCancellableCoroutine { cont ->
-                runOnUiThread {
-                    AlertDialog.Builder(this)
-                        .setTitle("📎 Входящий файл")
-                        .setMessage("$name (${size / 1024} КБ)")
-                        .setCancelable(false)
-                        .setPositiveButton("Принять") { _, _ -> cont.resumeWith(Result.success(true)) }
-                        .setNegativeButton("Отклонить") { _, _ -> cont.resumeWith(Result.success(false)) }
-                        .show()
-                }
-            }
+        meshNode.onFileOffer = { id, name, size, ip ->
+            ZvonController.awaitFileDecision(id, name, size, ip)
         }
+        ZvonController.onFileOfferChanged = { pending -> runOnUiThread {
+            if (pending == null) {
+                try { currentFileDialog?.dismiss() } catch (_: Exception) { }
+                currentFileDialog = null
+            } else if (currentFileDialog?.isShowing != true) {
+                currentFileDialog = AlertDialog.Builder(this)
+                    .setTitle("📎 Входящий файл")
+                    .setMessage("${pending.name} (${pending.size / 1024} КБ) от ${pending.ip}")
+                    .setCancelable(false)
+                    .setPositiveButton("Принять") { _, _ -> ZvonController.resolveFileOffer(true) }
+                    .setNegativeButton("Отклонить") { _, _ -> ZvonController.resolveFileOffer(false) }
+                    .show()
+            }
+        } }
         meshNode.onFileProgress = { _, name, sent, total, done, err -> runOnUiThread {
+            ZvonController.onFileOfferProgress?.invoke(name, sent, total, done, err)
             if (done) {
                 Toast.makeText(this, if (err != null) "❌ $name: $err" else "✅ $name получен", Toast.LENGTH_LONG).show()
             } else if (total > 0) {
@@ -373,6 +381,12 @@ class MainActivity : AppCompatActivity() {
     override fun onPause() { super.onPause(); InAppLogger.flush() }
     override fun onDestroy() {
         InAppLogger.write('I', "UI", "onDestroy"); InAppLogger.flush()
+        try { currentFileDialog?.dismiss() } catch (_: Exception) { }
+        currentFileDialog = null
+        ZvonController.onFileOfferChanged = null
+        // NB: pending deferred НЕ отменяем — meshNode.close() ниже отменит
+        // MeshNode-scope и awaitFileDecision уйдёт в finally. Если Activity
+        // пересоздаётся — новый onCreate подхватит pending через replay.
         super.onDestroy()
         pipeline?.let { p -> lifecycleScope.launch { p.stop() } }
         MeshForegroundService.stop(this); meshNode.close()
