@@ -13,6 +13,14 @@ class MeshNode(
     private val logger: MeshLogger = AndroidMeshLogger
 ) {
     private val prefs = context.getSharedPreferences("zvon_mesh", Context.MODE_PRIVATE)
+    val myDisplayName: String = try {
+        android.provider.Settings.Global.getString(context.contentResolver, "device_name")
+            ?.takeIf { it.isNotBlank() && it.length > 2 }
+            ?: android.provider.Settings.Secure.getString(context.contentResolver, "device_name")
+                ?.takeIf { it.isNotBlank() && it.length > 2 }
+            ?: android.os.Build.MODEL.ifBlank { "Zvon" }
+    } catch (_: Exception) { android.os.Build.MODEL.ifBlank { "Zvon" } }
+
     val myId: UUID = run {
         val aid = Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID)
         UUID.nameUUIDFromBytes(aid.toByteArray())
@@ -42,6 +50,7 @@ class MeshNode(
     @Volatile private var lastPacketAt = 0L
     @Volatile private var lastPongAt = 0L
     private val seenTextKeys = java.util.Collections.synchronizedSet(mutableSetOf<String>())
+    private val helloRepliedTo = java.util.Collections.synchronizedSet(mutableSetOf<String>())
 
     private var keepaliveJob: Job? = null
     private var watchdogJob: Job? = null
@@ -79,6 +88,7 @@ class MeshNode(
             if (!st.isGroupOwner) startHelloLoop(st.goIp)
             startPingLoop()
             onGroupFormed?.invoke(st.myIp, peerIp, st.isGroupOwner)
+            logger.d("[Mesh] MODE=P2P myIp=${st.myIp} peerIp=${peerIp ?: "?"} isGo=${st.isGroupOwner} name=${myDisplayName}")
         }
         wifi.onGroupLost = {
             logger.w("GROUP LOST")
@@ -188,7 +198,7 @@ class MeshNode(
         helloJob?.cancel()
         helloJob = scope.launch {
             while (isActive) {
-                if (!peerConfirmed) sendPacket(PacketType.HELLO, goIp, ByteArray(0))
+                if (!peerConfirmed) sendHelloWithName(goIp)
                 delay(2000)
             }
         }
@@ -247,6 +257,15 @@ class MeshNode(
                 peerConfirmed = true
                 if (!isGroupOwner) helloJob?.cancel()
                 syncIp()
+                // Парсим имя от пира
+                HelloPayload.decode(pkt.payload)?.let { savePeerName(pkt.sourceId, it.name) }
+                // Если мы GO — ответить своим HELLO (чтобы клиент узнал наше имя)
+                if (isGroupOwner) {
+                    val key = fromIp + ":" + pkt.sourceId
+                    if (helloRepliedTo.add(key)) {
+                        sendHelloWithName(fromIp)
+                    }
+                }
             }
             PacketType.KEEPALIVE -> { syncIp() }
             PacketType.CALL_INVITE -> {
@@ -324,6 +343,7 @@ class MeshNode(
                         udp.start(myLan)
                         fileTransfer.startServer(myLan)
                         onGroupFormed?.invoke(myLan, peerLanIp, false)
+                        logger.d("[Mesh] MODE=LAN myIp=$myLan peerIp=$peerLanIp name=${myDisplayName}")
                     }
                 }
             }
@@ -350,6 +370,25 @@ class MeshNode(
         lanMode = false
         myIp = null; peerIp = null; peerNodeId = null
         startLanDiscovery()
+    }
+
+
+
+    private suspend fun sendHelloWithName(destIp: String) {
+        try {
+            val payload = HelloPayload(myDisplayName).encode()
+            sendPacket(PacketType.HELLO, destIp, payload)
+            logger.d("[Mesh] HELLO → $destIp (name=${myDisplayName})")
+        } catch (e: Exception) { logger.w("[Mesh] sendHello failed: ${e.message}") }
+    }
+
+    private fun savePeerName(peerId: UUID, name: String) {
+        if (name.isBlank()) return
+        try {
+            contactsStore.upsert(peerId.toString(), name, "", "")
+            onContactsChanged?.invoke()
+            logger.d("[Mesh] peer name saved: ${peerId.toString().take(8)} → $name")
+        } catch (e: Exception) { logger.w("[Mesh] savePeerName failed: ${e.message}") }
     }
 
 

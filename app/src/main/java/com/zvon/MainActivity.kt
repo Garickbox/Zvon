@@ -182,24 +182,36 @@ class MainActivity : AppCompatActivity() {
             if (pending == null) {
                 try { currentFileDialog?.dismiss() } catch (_: Exception) { }
                 currentFileDialog = null
-            } else if (currentFileDialog?.isShowing != true) {
-                currentFileDialog = AlertDialog.Builder(this)
-                    .setTitle("📎 Входящий файл")
-                    .setMessage("${pending.name} (${pending.size / 1024} КБ) от ${pending.ip}")
-                    .setCancelable(false)
-                    .setPositiveButton("Принять") { _, _ -> ZvonController.resolveFileOffer(true) }
-                    .setNegativeButton("Отклонить") { _, _ -> ZvonController.resolveFileOffer(false) }
-                    .show()
+            } else {
+                NotificationHelper.showIncomingFileNotification(
+                    this, pending.id, pending.name, pending.size, pending.ip
+                )
+                if (currentFileDialog?.isShowing != true) {
+                    currentFileDialog = AlertDialog.Builder(this)
+                        .setTitle("📎 Входящий файл")
+                        .setMessage("${pending.name} (${pending.size / 1024} КБ) от ${pending.ip}")
+                        .setCancelable(false)
+                        .setPositiveButton("Принять") { _, _ -> ZvonController.resolveFileOffer(true) }
+                        .setNegativeButton("Отклонить") { _, _ -> ZvonController.resolveFileOffer(false) }
+                        .show()
+                }
             }
         } }
-        meshNode.onFileProgress = { _, name, sent, total, done, err -> runOnUiThread {
-            ZvonController.onFileOfferProgress?.invoke(name, sent, total, done, err)
+        meshNode.onFileProgress = { id, name, sent, total, done, err ->
             if (done) {
-                Toast.makeText(this, if (err != null) "❌ $name: $err" else "✅ $name получен", Toast.LENGTH_LONG).show()
-            } else if (total > 0) {
-                statusText.text = "📎 $name: ${sent * 100 / total}%"
+                NotificationHelper.showFileCompleteNotification(this, id, name, err == null, err)
+            } else {
+                NotificationHelper.updateFileProgressNotification(this, id, name, sent, total)
             }
-        } }
+            runOnUiThread {
+                ZvonController.onFileOfferProgress?.invoke(name, sent, total, done, err)
+                if (done) {
+                    Toast.makeText(this, if (err != null) "❌ $name: $err" else "✅ $name получен", Toast.LENGTH_LONG).show()
+                } else if (total > 0) {
+                    statusText.text = "📎 $name: ${sent * 100 / total}%"
+                }
+            }
+        }
         
         meshNode.start()
         
@@ -225,9 +237,12 @@ class MainActivity : AppCompatActivity() {
         }
         for (peer in peers) {
             val last = meshNode.chatStore.lastMessage(peer) ?: continue
+            val displayName = ZvonController.meshNode?.contactsStore?.get(peer)?.name
+                ?.takeIf { it.isNotBlank() && it != peer }
+                ?: peer.take(8)
             val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, 16, 0, 16) }
             row.addView(TextView(this).apply {
-                text = "💬 ${peer.take(8)}\n${last.body.take(30)}"
+                text = "💬 ${displayName}\n${last.body.take(30)}"
                 setTextColor(0xFFFFFFFF.toInt()); textSize = 14f
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
             })

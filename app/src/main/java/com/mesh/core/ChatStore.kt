@@ -40,9 +40,11 @@ class ChatStore(context: Context) {
     fun lastMessage(peerNodeId: String): Message? = cache[peerNodeId]?.lastOrNull()
 
     private fun load() {
-        if (!file.exists()) return
+        if (!file.exists()) { InAppLogger.write('I', "Chat", "no file, empty history"); return }
         try {
-            val root = JSONObject(file.readText())
+            val text = file.readText()
+            InAppLogger.write('I', "Chat", "load: file ${file.length()}B")
+            val root = JSONObject(text)
             val peers = root.optJSONObject("chats") ?: return
             for (peer in peers.keys()) {
                 val arr = peers.getJSONArray(peer)
@@ -55,7 +57,11 @@ class ChatStore(context: Context) {
                 }
                 cache[peer] = list
             }
-        } catch (_: Exception) { }
+            val total = cache.values.sumOf { it.size }
+            InAppLogger.write('I', "Chat", "loaded ${cache.size} peers, $total messages")
+        } catch (e: Exception) {
+            InAppLogger.write('E', "Chat", "load failed", e)
+        }
     }
 
     private fun save() {
@@ -70,6 +76,10 @@ class ChatStore(context: Context) {
                 peers.put(peer, arr)
             }
             root.put("chats", peers); file.writeText(root.toString())
-        } catch (_: Exception) { }
+            val total = cache.values.sumOf { it.size }
+            InAppLogger.write('D', "Chat", "saved ${cache.size} peers, $total msgs, ${file.length()}B")
+        } catch (e: Exception) {
+            InAppLogger.write('E', "Chat", "save failed", e)
+        }
     }
 }

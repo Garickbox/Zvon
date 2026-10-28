@@ -53,7 +53,11 @@ class ChatActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         peerId = intent.getStringExtra(EXTRA_PEER_ID) ?: run { finish(); return }
         peerIp = intent.getStringExtra(EXTRA_PEER_IP) ?: ""
-        peerName = intent.getStringExtra(EXTRA_PEER_NAME) ?: peerId.take(8)
+        peerName = ZvonController.meshNode?.contactsStore?.get(peerId)?.name
+            ?.takeIf { it.isNotBlank() && it != peerId }
+            ?: intent.getStringExtra(EXTRA_PEER_NAME)
+            ?: peerId.take(8)
+        InAppLogger.write('I', "Chat", "opened peer=$peerId name=$peerName")
 
         setContentView(R.layout.activity_chat)
         scroll = findViewById(R.id.scroll)

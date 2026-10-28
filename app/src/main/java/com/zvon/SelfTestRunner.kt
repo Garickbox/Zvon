@@ -51,6 +51,7 @@ class SelfTestRunner(private val context: Context) {
         add(check("NotificationListener", ::checkNotificationListener))
         add(check("Полноэкранные уведомления (FSI)", ::checkFullScreenIntent))
         add(check("MeshNode жизнь (Stage 6)", ::checkAppLifecycle))
+        add(check("Имя пира", ::checkPeerName))
         return results
     }
 
@@ -301,6 +302,20 @@ class SelfTestRunner(private val context: Context) {
         val mode = m.currentMode()
         val pipelineInfo = if (pip != null) "pipeline=alive" else "pipeline=null"
         return true to "meshNode=alive mode=$mode inGroup=$inGroup $pipelineInfo"
+    }
+
+
+
+    private fun checkPeerName(): Pair<Boolean, String> {
+        val m = ZvonController.meshNode ?: return false to "meshNode null"
+        val myName = m.myDisplayName
+        val peerId = m.currentPeerId()
+        val peerName = peerId?.let { m.contactsStore.get(it)?.name }
+        return if (peerName != null && peerName.isNotBlank() && peerName != peerId) {
+            true to "я=$myName, пир=$peerName"
+        } else {
+            true to "я=$myName, пир=${peerName ?: "неизвестно (ждём HELLO)"}"
+        }
     }
 
 

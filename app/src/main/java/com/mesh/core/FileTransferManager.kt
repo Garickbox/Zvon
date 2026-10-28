@@ -77,6 +77,7 @@ class FileTransferManager(
             val fileId = input.readUTF()
             val fromIp = sock.inetAddress.hostAddress ?: "?"
 
+            logger.d("[File] rx offer: $name ($size B) from $fromIp fileId=$fileId")
             val accept = onIncomingOffer(fileId, name, size, fromIp)
             if (!accept) { sock.close(); return@coroutineScope }
 
@@ -105,6 +106,7 @@ class FileTransferManager(
     }
 
     fun sendFile(uri: Uri, toIp: String) {
+        logger.d("[File] send requested → $toIp")
         scope.launch(Dispatchers.IO) {
             val fileId = java.util.UUID.randomUUID().toString()
             try {
@@ -130,6 +132,7 @@ class FileTransferManager(
                 out.writeLong(size)
                 out.writeUTF(fileId)
                 out.flush()
+                logger.d("[File] tx start: $name ($size B) fileId=$fileId → $toIp")
 
                 // 2. Stream file
                 val input = contentResolver.openInputStream(uri) ?: run {
@@ -149,7 +152,7 @@ class FileTransferManager(
                 }
                 sock.close()
                 onProgress(fileId, name, size, size, true, null)
-                logger.d("sent $name to $toIp")
+                logger.d("[File] tx done: $name ($size B) → $toIp")
             } catch (e: Exception) {
                 logger.e("sendFile", e)
                 onProgress(fileId, "", 0, 0, true, e.message ?: "error")

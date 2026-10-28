@@ -92,5 +92,6 @@
         <receiver
             android:name=".ReplyReceiver"
             android:exported="false" />
+            <receiver android:name=".FileActionReceiver" android:exported="false" />
     </application>
 </manifest>

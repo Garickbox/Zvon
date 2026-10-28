@@ -11,6 +11,7 @@ import androidx.core.app.NotificationCompat
 object NotificationHelper {
     const val CHANNEL_MSG = "zvon_messages"
     const val CHANNEL_CALL = "zvon_call"
+    const val CHANNEL_FILES = "zvon_files"
     const val NOTIF_INCOMING = 9001
 
     fun createChannels(context: Context) {
@@ -18,6 +19,9 @@ object NotificationHelper {
             val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             nm.createNotificationChannel(
                 NotificationChannel(CHANNEL_MSG, "Сообщения", NotificationManager.IMPORTANCE_HIGH)
+            )
+            nm.createNotificationChannel(
+                NotificationChannel(CHANNEL_FILES, "Файлы", NotificationManager.IMPORTANCE_DEFAULT)
             )
             nm.createNotificationChannel(
                 NotificationChannel(CHANNEL_CALL, "Звонки", NotificationManager.IMPORTANCE_HIGH).apply {
@@ -124,4 +128,79 @@ object NotificationHelper {
             nm.cancel(NOTIF_INCOMING)
         } catch (_: Exception) { }
     }
+    fun showIncomingFileNotification(context: Context, fileId: String, name: String, size: Long, fromIp: String) {
+        val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+
+        val openIntent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra("pending_file_id", fileId)
+        }
+        val piOpen = PendingIntent.getActivity(context, fileId.hashCode(), openIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+
+        val acceptIntent = Intent(context, FileActionReceiver::class.java).apply {
+            action = FileActionReceiver.ACTION_ACCEPT
+            putExtra(FileActionReceiver.EXTRA_FILE_ID, fileId)
+        }
+        val piAccept = PendingIntent.getBroadcast(context, fileId.hashCode() + 1, acceptIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+
+        val declineIntent = Intent(context, FileActionReceiver::class.java).apply {
+            action = FileActionReceiver.ACTION_DECLINE
+            putExtra(FileActionReceiver.EXTRA_FILE_ID, fileId)
+        }
+        val piDecline = PendingIntent.getBroadcast(context, fileId.hashCode() + 2, declineIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+
+        val sizeKb = size / 1024
+        val notif = NotificationCompat.Builder(context, CHANNEL_FILES)
+            .setSmallIcon(android.R.drawable.stat_sys_download)
+            .setContentTitle("📎 Входящий файл")
+            .setContentText("$name (${sizeKb} КБ) от $fromIp")
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setContentIntent(piOpen)
+            .setAutoCancel(true)
+            .addAction(0, "Принять", piAccept)
+            .addAction(0, "Отклонить", piDecline)
+            .build()
+        nm.notify(fileId.hashCode(), notif)
+    }
+
+    fun updateFileProgressNotification(context: Context, fileId: String, name: String, sent: Long, total: Long) {
+        try {
+            val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            val pct = if (total > 0) (sent * 100 / total).toInt() else 0
+            val notif = NotificationCompat.Builder(context, CHANNEL_FILES)
+                .setSmallIcon(android.R.drawable.stat_sys_download)
+                .setContentTitle("📎 Получение: $name")
+                .setContentText("$pct% (${sent / 1024} / ${total / 1024} КБ)")
+                .setProgress(100, pct, false)
+                .setOngoing(true)
+                .setOnlyAlertOnce(true)
+                .build()
+            nm.notify(fileId.hashCode(), notif)
+        } catch (_: Exception) {}
+    }
+
+    fun showFileCompleteNotification(context: Context, fileId: String, name: String, ok: Boolean, err: String?) {
+        try {
+            val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            val notif = NotificationCompat.Builder(context, CHANNEL_FILES)
+                .setSmallIcon(if (ok) android.R.drawable.stat_sys_download_done else android.R.drawable.stat_notify_error)
+                .setContentTitle(if (ok) "✅ Файл получен" else "❌ Ошибка передачи")
+                .setContentText(if (ok) name else "$name: ${err ?: "error"}")
+                .setAutoCancel(true)
+                .build()
+            nm.notify(fileId.hashCode(), notif)
+        } catch (_: Exception) {}
+    }
+
+    fun cancelFileNotification(context: Context, fileId: String) {
+        try {
+            val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            nm.cancel(fileId.hashCode())
+        } catch (_: Exception) {}
+    }
+
+
 }
