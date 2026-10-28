@@ -21,7 +21,9 @@ object NotificationHelper {
             )
             nm.createNotificationChannel(
                 NotificationChannel(CHANNEL_CALL, "Звонки", NotificationManager.IMPORTANCE_HIGH).apply {
-                    setShowBadge(false); description = "Входящие звонки"
+                    setShowBadge(false)
+                    description = "Входящие звонки"
+                    setSound(null, null)  // ringtone играет MainActivity, channel — тихо
                 }
             )
         }

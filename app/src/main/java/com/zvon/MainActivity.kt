@@ -111,7 +111,20 @@ class MainActivity : AppCompatActivity() {
         meshNode.onGroupFormed = { myIp, peerIp, isGo -> runOnUiThread { onGroupReady(myIp, peerIp, isGo) } }
         meshNode.onGroupLost = { runOnUiThread { statusText.text = "Группа потеряна"; if (showingChats) renderChats() } }
         meshNode.onIncomingCall = { ip -> runOnUiThread { handleIncomingCall(ip) } }
-        meshNode.onCallConnected = { runOnUiThread { dismissRinging(); showInCallUi("Соединено"); startDurationTimer() } }
+        meshNode.onCallConnected = { runOnUiThread {
+            if (pipeline == null) {
+                val ip = meshNode.currentPeerIp() ?: currentPeerIp
+                if (ip != null) {
+                    InAppLogger.write('I', "Main", "onCallConnected: pipeline NULL → create for $ip")
+                    startNetworkPipeline(ip)
+                } else {
+                    InAppLogger.write('E', "Main", "onCallConnected: no peerIp, audio will be silent!")
+                }
+            }
+            dismissRinging()
+            showInCallUi("Соединено")
+            startDurationTimer()
+        } }
         meshNode.onCallEnded = { reason -> runOnUiThread { dismissRinging(); hideCallUi(reason) } }
         meshNode.onVoiceReceived = { seq, data -> pipeline?.onNetworkVoicePacket(seq, data) }
         meshNode.onContactsChanged = { runOnUiThread { if (showingChats) renderChats() } }

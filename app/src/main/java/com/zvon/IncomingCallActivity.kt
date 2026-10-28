@@ -3,8 +3,6 @@ package com.zvon
 import android.app.KeyguardManager
 import android.content.Context
 import android.content.Intent
-import android.media.Ringtone
-import android.media.RingtoneManager
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -24,7 +22,6 @@ class IncomingCallActivity : AppCompatActivity() {
     }
 
     private var ip: String = ""
-    private var ringtone: Ringtone? = null
     private val handler = Handler(Looper.getMainLooper())
     private val timeoutRunnable = Runnable {
         InAppLogger.write('I', "Incoming", "timeout → decline $ip")
@@ -60,7 +57,6 @@ class IncomingCallActivity : AppCompatActivity() {
         findViewById<Button>(R.id.btnAccept).setOnClickListener { accept() }
         findViewById<Button>(R.id.btnDecline).setOnClickListener { decline() }
 
-        playRingtone()
         handler.postDelayed(timeoutRunnable, TIMEOUT_MS)
         InAppLogger.write('I', "Incoming", "shown for $ip")
     }
@@ -75,7 +71,6 @@ class IncomingCallActivity : AppCompatActivity() {
 
     private fun accept() {
         handler.removeCallbacks(timeoutRunnable)
-        stopRingtone()
         NotificationHelper.cancelIncomingCall(this)
         InAppLogger.write('I', "Incoming", "ACCEPT $ip")
         ZvonController.meshNode?.acceptCall(ip)
@@ -84,29 +79,14 @@ class IncomingCallActivity : AppCompatActivity() {
 
     private fun decline() {
         handler.removeCallbacks(timeoutRunnable)
-        stopRingtone()
         NotificationHelper.cancelIncomingCall(this)
         InAppLogger.write('I', "Incoming", "DECLINE $ip")
         ZvonController.meshNode?.declineCall(ip)
         finish()
     }
 
-    private fun playRingtone() {
-        try {
-            val uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
-            ringtone = RingtoneManager.getRingtone(applicationContext, uri)
-            ringtone?.play()
-        } catch (_: Exception) { }
-    }
-
-    private fun stopRingtone() {
-        try { ringtone?.stop() } catch (_: Exception) { }
-        ringtone = null
-    }
-
     override fun onDestroy() {
         handler.removeCallbacks(timeoutRunnable)
-        stopRingtone()
         super.onDestroy()
     }
 }

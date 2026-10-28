@@ -39,6 +39,7 @@ class MeshNode(
     @Volatile private var callState = CallState.IDLE
     @Volatile private var lastPacketAt = 0L
     @Volatile private var lastPongAt = 0L
+    private val seenTextKeys = java.util.Collections.synchronizedSet(mutableSetOf<String>())
 
     private var keepaliveJob: Job? = null
     private var watchdogJob: Job? = null
@@ -110,14 +111,14 @@ class MeshNode(
 
     fun call(ip: String) {
         if (callState != CallState.IDLE) return
-        callState = CallState.CALLING
+        callState = CallState.CALLING; logger.d("[Mesh] state=CALLING $ip")
         peerIp = ip
         lastPacketAt = System.currentTimeMillis()
         scope.launch { sendPacket(PacketType.CALL_INVITE, ip, ByteArray(0)) }
     }
 
     fun acceptCall(ip: String) {
-        callState = CallState.IN_CALL
+        callState = CallState.IN_CALL; logger.d("[Mesh] state=IN_CALL $ip")
         peerIp = ip
         lastPacketAt = System.currentTimeMillis()
         startCallLoops()
@@ -145,8 +146,19 @@ class MeshNode(
 
     fun sendText(destNodeId: String, destIp: String, text: String) {
         scope.launch {
-            sendPacket(PacketType.TEXT, destIp, TextPayload(text).encode())
-            chatStore.add(destNodeId, Message(0, destNodeId, true, "text", text, null, System.currentTimeMillis()))
+            try {
+                val seq = System.nanoTime()
+                val payload = TextPayload(text).encode()
+                val pkt = MeshPacket.encode(MeshPacket(PacketType.TEXT, myId, MeshPacket.BROADCAST, seq, payload))
+                repeat(3) { i ->
+                    udp.send(destIp, pkt)
+                    logger.d("[Mesh] TEXT tx#$i seq=$seq to $destIp (${payload.size}B)")
+                    if (i < 2) delay(400)
+                }
+                chatStore.add(destNodeId, Message(0, destNodeId, true, "text", text, null, System.currentTimeMillis()))
+            } catch (e: Exception) {
+                logger.e("[Mesh] sendText failed", e)
+            }
         }
     }
 
@@ -226,7 +238,7 @@ class MeshNode(
             PacketType.KEEPALIVE -> { syncIp() }
             PacketType.CALL_INVITE -> {
                 peerIp = fromIp; peerNodeId = pkt.sourceId.toString()
-                if (callState == CallState.IDLE) { callState = CallState.RINGING; onIncomingCall?.invoke(fromIp) }
+                if (callState == CallState.IDLE) { callState = CallState.RINGING; logger.d("[Mesh] state=RINGING $fromIp"); onIncomingCall?.invoke(fromIp) }
                 else { sendPacket(PacketType.CALL_BYE, fromIp, ByteArray(0)) }
             }
             PacketType.CALL_ACCEPT -> { if (callState == CallState.CALLING) { callState = CallState.IN_CALL; startCallLoops(); onCallConnected?.invoke() } }
@@ -236,8 +248,21 @@ class MeshNode(
                 syncIp()
                 TextPayload.decode(pkt.payload)?.let {
                     val fromNode = pkt.sourceId.toString()
-                    chatStore.add(fromNode, Message(0, fromNode, false, "text", it.text, null, System.currentTimeMillis()))
-                    onTextReceived?.invoke(fromNode, it.text)
+                    val key = "$fromNode:${pkt.seq}"
+                    if (seenTextKeys.add(key)) {
+                        logger.d("[Mesh] TEXT rx seq=${pkt.seq} from=$fromNode (${it.text.length}c)")
+                        chatStore.add(fromNode, Message(0, fromNode, false, "text", it.text, null, System.currentTimeMillis()))
+                        onTextReceived?.invoke(fromNode, it.text)
+                        if (seenTextKeys.size > 1000) {
+                            synchronized(seenTextKeys) {
+                                val iter = seenTextKeys.iterator()
+                                var n = 0
+                                while (iter.hasNext() && n < 500) { iter.next(); iter.remove(); n++ }
+                            }
+                        }
+                    } else {
+                        logger.d("[Mesh] TEXT dup skipped seq=${pkt.seq}")
+                    }
                 }
             }
             else -> { }

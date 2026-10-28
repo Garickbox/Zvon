@@ -104,6 +104,12 @@ class WifiDirectManager(
             override fun onFailure(reason: Int) { logger.w("[P2P] discoverPeers failed $reason"); d.complete(false) }
         }) ?: d.complete(false)
         d.await()
+        // Periodic refresh: если peers не пришёл по broadcast — сами спросим
+        for (i in 0 until 5) {
+            delay(2500)
+            if (state !is P2pState.Discovering) return
+            try { refreshPeers() } catch (_: Exception) {}
+        }
     }
 
     @SuppressLint("MissingPermission")
