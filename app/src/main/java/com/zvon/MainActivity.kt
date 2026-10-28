@@ -78,9 +78,6 @@ class MainActivity : AppCompatActivity() {
             showNotifAccessDialog()
         }
         findViewById<Button>(R.id.btnPeerTest).setOnClickListener {
-            ZvonController.peerTestRunner = com.mesh.core.PeerTestRunner(
-                meshNode
-            ) { msg -> InAppLogger.write('I', "PeerTest", msg) }
             startActivity(Intent(this, PeerTestActivity::class.java))
         }
         findViewById<Button>(R.id.btnSelfTest).setOnClickListener {
@@ -143,6 +140,7 @@ class MainActivity : AppCompatActivity() {
         meshNode.onCallEnded = { reason -> runOnUiThread { dismissRinging(); hideCallUi(reason) } }
         meshNode.onVoiceReceived = { seq, data -> pipeline?.onNetworkVoicePacket(seq, data) }
         meshNode.onContactsChanged = { runOnUiThread { if (showingChats) renderChats() } }
+        ZvonController.peerTestRunner = com.mesh.core.PeerTestRunner(meshNode)
         meshNode.onTestPacket = { fromIp, payload -> ZvonController.peerTestRunner?.onIncoming(fromIp, payload) }
         
         meshNode.onTextReceived = { fromId, text -> runOnUiThread {

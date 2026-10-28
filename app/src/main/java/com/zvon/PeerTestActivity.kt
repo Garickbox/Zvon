@@ -42,14 +42,16 @@ class PeerTestActivity : AppCompatActivity() {
         if (mesh == null) { Toast.makeText(this, "Сервис не запущен", Toast.LENGTH_SHORT).show(); return }
         val peerIp = mesh.currentPeerIp()
         if (peerIp == null) { Toast.makeText(this, "Нет соединения с пиром", Toast.LENGTH_SHORT).show(); return }
+        val runner = ZvonController.peerTestRunner
+        if (runner == null) { Toast.makeText(this, "Runner не инициализирован", Toast.LENGTH_SHORT).show(); return }
 
         list.removeAllViews()
         summary.text = "Запуск…"
 
+        // Используем ТОТ ЖЕ runner, что принимает onTestPacket — иначе accept/invite уходят в разные экземпляры
+        runner.onProgress = { progress -> runOnUiThread { addRow("• $progress") } }
+
         lifecycleScope.launch {
-            val runner = PeerTestRunner(mesh) { progress ->
-                runOnUiThread { addRow("• $progress") }
-            }
             val report = runner.runAsMaster(peerIp)
             lastReport = report
             runOnUiThread { showReport(report) }

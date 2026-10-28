@@ -25,27 +25,34 @@ class FileTransferManager(
 
     private var serverSocket: ServerSocket? = null
     private var serverJob: Job? = null
+    @Volatile private var serverStopped = true
 
     fun startServer(bindIp: String) {
         stopServer()
+        serverStopped = false
         try {
             val ss = ServerSocket()
             ss.reuseAddress = true
             ss.bind(InetSocketAddress(InetAddress.getByName(bindIp), PORT))
             serverSocket = ss
             serverJob = scope.launch(Dispatchers.IO) {
-                while (isActive && !ss.isClosed) {
+                while (isActive && !serverStopped) {
                     try {
                         val sock = ss.accept()
+                        if (serverStopped) { runCatching { sock.close() }; break }
                         launch(Dispatchers.IO) { handleIncoming(sock) }
-                    } catch (e: Exception) { if (!ss.isClosed) logger.w("accept: ${e.message}") }
+                    } catch (e: Exception) {
+                        if (serverStopped || !isActive || ss.isClosed) break
+                        logger.w("accept: ${e.message}")
+                    }
                 }
             }
             logger.d("TCP file server on $bindIp:$PORT")
-        } catch (e: Exception) { logger.e("TCP server failed", e) }
+        } catch (e: Exception) { logger.e("TCP server failed", e); serverStopped = true }
     }
 
     fun stopServer() {
+        serverStopped = true
         serverJob?.cancel(); serverJob = null
         runCatching { serverSocket?.close() }
         serverSocket = null

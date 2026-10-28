@@ -1,7 +1,6 @@
 package com.mesh.core
 
 import kotlinx.coroutines.*
-import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
@@ -9,7 +8,7 @@ import java.util.concurrent.atomic.AtomicInteger
 
 class PeerTestRunner(
     private val mesh: MeshNode,
-    private val onProgress: (String) -> Unit
+    var onProgress: ((String) -> Unit)? = null
 ) {
     data class Report(
         val success: Boolean,
@@ -24,21 +23,25 @@ class PeerTestRunner(
     @Volatile private var masterMode = false
 
     private val pongs = ConcurrentHashMap<Long, Long>()
-    private val acceptWaiter = CompletableDeferred<Boolean>()
-    private val voiceDone = CompletableDeferred<Int>()
-    private val textDone = CompletableDeferred<String>()
+    private var acceptWaiter = CompletableDeferred<Boolean>()
+    private var voiceDone = CompletableDeferred<Int>()
+    private var textDone = CompletableDeferred<String>()
 
     private val slaveVoiceCount = AtomicInteger(0)
     private val slaveTextOrder = mutableListOf<String>()
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-
     fun onIncoming(fromIp: String, payload: String) {
         val p = TestPacket.parse(payload) ?: return
+        if (p.t != "voice" && p.t != "text") {
+            InAppLogger.write('D', "PeerTest", "rx ${p.t} from $fromIp seq=${p.seq} master=$masterMode")
+        }
         when (p.t) {
             "invite" -> handleInvite(fromIp, p)
-            "accept" -> if (masterMode && acceptWaiter.isActive) acceptWaiter.complete(true)
-            "decline" -> if (masterMode && acceptWaiter.isActive) acceptWaiter.complete(false)
+            "accept" -> if (masterMode && !acceptWaiter.isCompleted) {
+                InAppLogger.write('I', "PeerTest", "accept received → go")
+                acceptWaiter.complete(true)
+            }
+            "decline" -> if (masterMode && !acceptWaiter.isCompleted) acceptWaiter.complete(false)
             "ping" -> sendTest(fromIp, p.id, "pong", p.seq)
             "pong" -> pongs[p.seq] = System.currentTimeMillis()
             "voice" -> slaveVoiceCount.incrementAndGet()
@@ -52,8 +55,8 @@ class PeerTestRunner(
                 }.toString()
                 sendTest(fromIp, p.id, "text_done", 0, json)
             }
-            "voice_done" -> if (masterMode && voiceDone.isActive) voiceDone.complete(p.data?.toIntOrNull() ?: -1)
-            "text_done" -> if (masterMode && textDone.isActive) textDone.complete(p.data ?: "{}")
+            "voice_done" -> if (masterMode && !voiceDone.isCompleted) voiceDone.complete(p.data?.toIntOrNull() ?: -1)
+            "text_done" -> if (masterMode && !textDone.isCompleted) textDone.complete(p.data ?: "{}")
         }
     }
 
@@ -63,14 +66,16 @@ class PeerTestRunner(
     }
 
     private fun handleInvite(fromIp: String, p: TestPacket) {
-        InAppLogger.write('I', "PeerTest", "invite from $fromIp id=${p.id}")
+        InAppLogger.write('I', "PeerTest", "invite from $fromIp id=${p.id} → auto-accept")
         synchronized(slaveTextOrder) { slaveTextOrder.clear() }
         slaveVoiceCount.set(0)
-        // Auto-accept (это тест-инструмент, обе стороны должны понимать что происходит)
         sendTest(fromIp, p.id, "accept")
     }
 
     private fun sendTest(ip: String, id: String, type: String, seq: Long = 0L, data: String? = null) {
+        if (type != "voice" && type != "text") {
+            InAppLogger.write('D', "PeerTest", "tx $type seq=$seq to $ip")
+        }
         mesh.sendTestPacket(ip, TestPacket(type, id, seq, data).toJson())
     }
 
@@ -78,16 +83,20 @@ class PeerTestRunner(
         masterMode = true
         masterPeerIp = peerIp
         testId = UUID.randomUUID().toString()
+        acceptWaiter = CompletableDeferred()
+        voiceDone = CompletableDeferred()
+        textDone = CompletableDeferred()
+        pongs.clear()
+
         val rtts = mutableListOf<Long>()
 
         try {
-            onProgress("Приглашаем пира…")
+            onProgress?.invoke("Приглашаем пира…")
             sendTest(peerIp, testId, "invite")
             val accepted = withTimeoutOrNull(15_000) { acceptWaiter.await() } ?: false
-            if (!accepted) return@coroutineScope Report(false, 0, 0, 0, 0, 0, 0, 0, 0, false, "Пир не принял приглашение")
+            if (!accepted) return@coroutineScope Report(false, 0, 0, 0, 0, 0, 0, 0, 0, false, "Пир не принял приглашение (timeout 15s)")
 
-            // PING × 5
-            onProgress("Рукопожатие (5 пакетов)…")
+            onProgress?.invoke("Рукопожатие (5 пакетов)…")
             for (i in 1..5L) {
                 pongs.remove(i)
                 sendTest(peerIp, testId, "ping", i)
@@ -101,20 +110,19 @@ class PeerTestRunner(
             }
             if (rtts.size < 3) return@coroutineScope Report(false, 0, 0, 0, 0, 0, 0, 0, 0, false, "PONG: ${rtts.size}/5")
 
-            // VOICE 100 пакетов
-            onProgress("Голос: 100 пакетов…")
+            onProgress?.invoke("Голос: 100 пакетов…")
             for (i in 1..100L) sendTest(peerIp, testId, "voice", i, "V$i")
             sendTest(peerIp, testId, "voice_done_req")
             val vRecv = withTimeoutOrNull(5000) { voiceDone.await() } ?: -1
             if (vRecv < 0) return@coroutineScope Report(false, rtts.min(), rtts.average().toLong(), rtts.max(), 100, 0, 0, 0, 0, false, "Voice: нет ответа")
 
-            // TEXT 10 сообщений
-            onProgress("Текст: 10 сообщений…")
+            onProgress?.invoke("Текст: 10 сообщений…")
             for (i in 1..10L) { sendTest(peerIp, testId, "text", i, "MSG$i"); delay(30) }
             sendTest(peerIp, testId, "text_done_req")
             val tJson = withTimeoutOrNull(5000) { textDone.await() } ?: return@coroutineScope Report(false, rtts.min(), rtts.average().toLong(), rtts.max(), 100, vRecv, 10, 0, 0, false, "Text: нет ответа")
             val tObj = JSONObject(tJson)
 
+            onProgress?.invoke("Готово")
             Report(
                 success = true,
                 rttMin = rtts.min(), rttAvg = rtts.average().toLong(), rttMax = rtts.max(),
@@ -128,6 +136,4 @@ class PeerTestRunner(
             masterMode = false
         }
     }
-
-    fun cancel() { scope.cancel() }
 }
