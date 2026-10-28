@@ -26,6 +26,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import java.util.Locale
 
 class MainActivity : AppCompatActivity() {
@@ -88,17 +89,17 @@ class MainActivity : AppCompatActivity() {
         meshNode = MeshNode(this)
         meshNode.onPeersChanged = { peers -> runOnUiThread { renderPeers(peers) } }
         meshNode.onGroupFormed = { myIp, peerIp, isGo -> runOnUiThread { onGroupReady(myIp, peerIp, isGo) } }
-        meshNode.onGroupLost = { runOnUiThread { statusText.text = "Группа потеряна"; renderReconnect() } }
+        meshNode.onGroupLost = { runOnUiThread { statusText.text = "Группа потеряна"; renderContacts() } }
         meshNode.onIncomingCall = { ip -> runOnUiThread { showIncomingDialog(ip) } }
         meshNode.onCallConnected = { runOnUiThread { showInCallUi("Соединено"); startDurationTimer() } }
         meshNode.onCallEnded = { reason -> runOnUiThread { hideCallUi(reason) } }
         meshNode.onVoiceReceived = { seq, data -> pipeline?.onNetworkVoicePacket(seq, data) }
-        ChatActivity.setNode(meshNode)
+        meshNode.onContactsChanged = { runOnUiThread { renderContacts() } }
         meshNode.onTextReceived = { fromId, _, text -> runOnUiThread {
             Toast.makeText(this, "💬 ${fromId.take(8)}: ${text.take(30)}", Toast.LENGTH_SHORT).show()
         } }
         meshNode.onFileOffer = { id, name, size, _ ->
-            kotlinx.coroutines.suspendCancellableCoroutine { cont ->
+            suspendCancellableCoroutine { cont ->
                 runOnUiThread {
                     AlertDialog.Builder(this)
                         .setTitle("📎 Входящий файл")
@@ -119,10 +120,14 @@ class MainActivity : AppCompatActivity() {
                 statusText.text = "📎 $name: $pct%"
             }
         } }
-        meshNode.onContactsChanged = { runOnUiThread { renderContacts() } }
+        ChatActivity.setNode(meshNode)
         meshNode.start()
+        
         android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-            if (meshNode.hasLastDevice()) meshNode.tryAutoReconnect()
+            if (meshNode.hasLastDevice()) {
+                statusText.text = "Автопереподключение…"
+                meshNode.tryAutoReconnect()
+            }
         }, 2000)
     }
 
@@ -143,24 +148,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun wireUi() {
-        btnForceReset.setOnClickListener {
-            statusText.text = "Сброс…"; peerList.removeAllViews(); meshNode.forceReset()
-        }
-        btnDiscover.setOnClickListener {
-            peerList.removeAllViews(); statusText.text = "Поиск..."; meshNode.discover()
-        }
+        btnForceReset.setOnClickListener { statusText.text = "Сброс…"; peerList.removeAllViews(); meshNode.forceReset() }
+        btnDiscover.setOnClickListener { peerList.removeAllViews(); statusText.text = "Поиск..."; meshNode.discover() }
         btnRaw.setOnClickListener { toggleLoopback(PipelineMode.RAW_CODEC) }
         btnLoopback.setOnClickListener { toggleLoopback(PipelineMode.FULL_LOOPBACK) }
-    }
-
-    private fun renderReconnect() {
-        peerList.removeAllViews()
-        if (meshNode.hasLastDevice()) {
-            peerList.addView(Button(this).apply {
-                text = "🔄 Переподключиться"
-                setOnClickListener { statusText.text = "Переподключение…"; meshNode.tryReconnect() }
-            })
-        }
     }
 
     private fun toggleLoopback(mode: PipelineMode) {
@@ -183,12 +174,10 @@ class MainActivity : AppCompatActivity() {
 
     private fun renderPeers(peers: List<MeshNode.WifiP2pDeviceInfo>) {
         peerList.removeAllViews()
-        if (peers.isEmpty()) { statusText.text = "Никого не найдено"; renderReconnect(); return }
+        if (peers.isEmpty()) { statusText.text = "Никого не найдено"; renderContacts(); return }
         statusText.text = "Найдено: ${peers.size}"
         peers.forEach { peer ->
-            val row = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL; setPadding(0, 8, 0, 8)
-            }
+            val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, 8, 0, 8) }
             row.addView(TextView(this).apply {
                 text = "${peer.name}\n${peer.address}"
                 setTextColor(0xFFFFFFFF.toInt()); textSize = 14f
@@ -200,9 +189,7 @@ class MainActivity : AppCompatActivity() {
                     isEnabled = false; text = "Подключение…"
                     statusText.text = "Подключение к ${peer.address}…"
                     meshNode.connectTo(peer.raw)
-                    (btn as Button).postDelayed({
-                        if (!isEnabled) { isEnabled = true; text = "Подключить" }
-                    }, 35_000)
+                    (btn as Button).postDelayed({ if (!isEnabled) { isEnabled = true; text = "Подключить" } }, 35000)
                 }
             })
             peerList.addView(row)
@@ -220,22 +207,17 @@ class MainActivity : AppCompatActivity() {
                 setOnClickListener { callPeer(peerIp) }
             })
             peerList.addView(Button(this).apply {
-                text = "💬 Чат с ${peerIp}"
+                text = "💬 Чат с $peerIp"
                 setOnClickListener {
                     startActivity(Intent(this@MainActivity, ChatActivity::class.java).apply {
-                        putExtra(ChatActivity.EXTRA_PEER_ID, meshNode.currentPeerIp()?.let {
-                            // nodeId мы не знаем до HELLO, используем IP как ключ (для MVP)
-                            it
-                        })
+                        putExtra(ChatActivity.EXTRA_PEER_ID, peerIp)
                         putExtra(ChatActivity.EXTRA_PEER_IP, peerIp)
                         putExtra(ChatActivity.EXTRA_PEER_NAME, peerIp)
                     })
                 }
             })
         } else {
-            peerList.addView(TextView(this).apply {
-                text = "Ожидание партнёра..."; setTextColor(0xFFAAAAAA.toInt()); textSize = 13f
-            })
+            peerList.addView(TextView(this).apply { text = "Ожидание партнёра..."; setTextColor(0xFFAAAAAA.toInt()); textSize = 13f })
         }
     }
 
@@ -293,7 +275,7 @@ class MainActivity : AppCompatActivity() {
             if (peer != null) peerList.addView(Button(this).apply {
                 text = "📞 Позвонить снова $peer"; setOnClickListener { callPeer(peer) }
             })
-        } else { statusText.text = "Звонок завершён ($reason)"; renderReconnect() }
+        } else { statusText.text = "Звонок завершён ($reason)"; renderContacts() }
     }
 
     private fun toggleMute() {
@@ -305,10 +287,8 @@ class MainActivity : AppCompatActivity() {
     private fun toggleSpeaker() {
         try {
             val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
-            @Suppress("DEPRECATION")
-            val nv = !am.isSpeakerphoneOn
-            @Suppress("DEPRECATION")
-            am.isSpeakerphoneOn = nv
+            @Suppress("DEPRECATION") val nv = !am.isSpeakerphoneOn
+            @Suppress("DEPRECATION") am.isSpeakerphoneOn = nv
             btnSpeaker.text = if (nv) "📢 Динамик" else "📞 Телефон"
         } catch (_: Exception) { }
     }

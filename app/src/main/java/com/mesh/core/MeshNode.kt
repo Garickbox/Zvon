@@ -114,7 +114,6 @@ class MeshNode(
     fun lastKnownPeerIp(): String? = lastKnownPeer
     fun hasLastDevice(): Boolean = lastKnownDevice != null
     fun isInGroup(): Boolean = myIp != null && udp.isBound()
-    fun saveDir(): java.io.File = saveDir
 
     fun call(ip: String) {
         if (callState != CallState.IDLE) return
