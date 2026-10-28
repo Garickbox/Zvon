@@ -1,5 +1,7 @@
 package com.zvon
 
+import com.mesh.core.InAppLogger
+
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
@@ -281,12 +283,13 @@ class SelfTestRunner(private val context: Context) {
 
     private fun checkFullScreenIntent(): Pair<Boolean, String> {
         if (Build.VERSION.SDK_INT < 34) {
-            return true to "Android < 14 — не требуется"
+            return true to "Android ${Build.VERSION.SDK_INT} < 14 — FSI не блокируется"
         }
         return try {
             val nm = context.getSystemService(android.app.NotificationManager::class.java)
-            if (nm.canUseFullScreenIntent()) true to "разрешено"
-            else false to "ЗАПРЕЩЕНО — Настройки → Уведомления → Zvon → Полноэкранные"
+            val can = nm.canUseFullScreenIntent()
+            if (can) true to "✅ разрешено (Android ${Build.VERSION.SDK_INT})"
+            else false to "❌ ЗАПРЕЩЕНО (Android ${Build.VERSION.SDK_INT}) — Настройки → Приложения → Zvon → Специальные права → Полноэкранные уведомления → Разрешить"
         } catch (e: Exception) {
             false to "ошибка: ${e.message}"
         }

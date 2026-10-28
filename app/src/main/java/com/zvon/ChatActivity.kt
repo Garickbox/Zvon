@@ -19,6 +19,7 @@ import com.google.android.material.appbar.MaterialToolbar
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.card.MaterialCardView
 import com.mesh.core.Message
+import com.mesh.core.InAppLogger
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*

@@ -1,5 +1,7 @@
 package com.zvon
 
+import com.mesh.core.InAppLogger
+
 import android.Manifest
 import android.annotation.SuppressLint
 import android.app.AlertDialog
@@ -63,6 +65,7 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ checkFsiOnStart() }, 2000)
         NotificationHelper.createChannels(this)
         
         statusText = findViewById(R.id.statusText)
@@ -432,18 +435,29 @@ class MainActivity : AppCompatActivity() {
 
 
     private fun handleIncomingCall(ip: String) {
-        // Рингтон и таймаут — теперь ТОЛЬКО в IncomingCallActivity.
-        // Здесь только: показать нотификацию и попытаться поднять Activity.
+        // startActivity из фона блокируется Android 10+ (background activity launch).
+        // ПРАВИЛЬНЫЙ путь — только FSI-notification. Activity откроется сама.
+        // Метод startActivity ниже оставлен только как fallback для старых Android,
+        // где FSI ещё не блокируется.
+        InAppLogger.write('I', "Main", "handleIncomingCall $ip (via FSI notification)")
         NotificationHelper.showIncomingCallNotification(this, ip)
+        // Fallback: только если foreground (иначе система всё равно проигнорирует)
         try {
-            startActivity(Intent(this, IncomingCallActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-                putExtra(IncomingCallActivity.EXTRA_IP, ip)
-            })
+            if (isInForeground()) {
+                InAppLogger.write('I', "Main", "app in foreground, launching IncomingCallActivity directly")
+                startActivity(Intent(this, IncomingCallActivity::class.java).apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                    putExtra(IncomingCallActivity.EXTRA_IP, ip)
+                })
+            }
         } catch (e: Exception) {
-            InAppLogger.write('E', "Main", "startIncomingCallActivity failed", e)
+            InAppLogger.write('W', "Main", "startActivity from background blocked: ${e.message}")
         }
     }
+
+    @Volatile private var foreground = false
+
+    private fun isInForeground(): Boolean = foreground
 
 
 
@@ -481,6 +495,28 @@ class MainActivity : AppCompatActivity() {
 
     private var updateDialog: AlertDialog? = null
     private var updateDownloading = false
+
+
+    private fun checkFsiOnStart() {
+        if (Build.VERSION.SDK_INT < 34) return
+        val nm = getSystemService(NotificationManager::class.java)
+        if (nm.canUseFullScreenIntent()) return
+        val prefs = getSharedPreferences("zvon_fsi", MODE_PRIVATE)
+        if (prefs.getBoolean("asked", false)) return
+        prefs.edit().putBoolean("asked", true).apply()
+        AlertDialog.Builder(this)
+            .setTitle("📞 Звонок на весь экран")
+            .setMessage("Чтобы при входящем звонке экран загорался САМ (даже в фоне), нужно разрешение:\n\nНастройки → Приложения → Zvon → Специальные права → Полноэкранные уведомления → Разрешить")
+            .setPositiveButton("Открыть настройки") { _, _ ->
+                try {
+                    startActivity(Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT, Uri.parse("package:$packageName")))
+                } catch (_: Exception) {
+                    try { startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))) } catch (_: Exception) {}
+                }
+            }
+            .setNegativeButton("Позже", null)
+            .show()
+    }
 
     private fun checkUpdateOnStart() {
         val prefs = getSharedPreferences("zvon_update", MODE_PRIVATE)
