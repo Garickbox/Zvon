@@ -36,7 +36,6 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var meshNode: MeshNode
     private var pipeline: AudioPipeline? = null
-    private var ringtone: Ringtone? = null
 
     private lateinit var statusText: TextView
     private lateinit var peerList: LinearLayout
@@ -58,7 +57,6 @@ class MainActivity : AppCompatActivity() {
     private var callStartMs = 0L
     private var durationJob: Job? = null
     private var showingChats = false
-    private var isRinging = false
     private var currentFileDialog: AlertDialog? = null
     private var currentPeerTestDialog: AlertDialog? = null
 
@@ -73,6 +71,7 @@ class MainActivity : AppCompatActivity() {
         btnForceReset = findViewById(R.id.btnForceReset)
         btnShareLog = findViewById(R.id.btnShareLog)
         findViewById<Button>(R.id.btnCheckUpdate)?.setOnClickListener { manualCheckUpdate() }
+        findViewById<Button>(R.id.btnFsiPermission)?.setOnClickListener { forceFsiPermission() }
         findViewById<Button>(R.id.btnFiles).setOnClickListener {
             startActivity(Intent(this, FilesActivity::class.java))
         }
@@ -136,7 +135,6 @@ class MainActivity : AppCompatActivity() {
                     InAppLogger.write('E', "Main", "onCallConnected: no peerIp, audio will be silent!")
                 }
             }
-            dismissRinging()
             showInCallUi("Соединено")
             startDurationTimer()
         } }
@@ -337,20 +335,6 @@ class MainActivity : AppCompatActivity() {
             .setNegativeButton("Отклонить") { _, _ -> stopRingtone(); meshNode.declineCall(ip) }.show()
     }
 
-    private fun playRingtone() {
-        try {
-            val uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
-            ringtone = RingtoneManager.getRingtone(applicationContext, uri)
-            ringtone?.play()
-        } catch (_: Exception) { }
-    }
-    private fun stopRingtone() { try { ringtone?.stop() } catch (_: Exception) { }; ringtone = null }
-
-    private fun startNetworkPipeline(peerIp: String) {
-        MeshForegroundService.start(this, peerIp)
-        val p = AudioPipeline(mode = PipelineMode.NETWORK, voiceSender = { seq, data, ip -> meshNode.sendVoice(seq, data, ip) })
-        p.start(peerIp); pipeline = p
-    }
 
     private fun showInCallUi(status: String) {
         discoveryView.visibility = View.GONE; callView.visibility = View.VISIBLE
@@ -427,36 +411,19 @@ class MainActivity : AppCompatActivity() {
 
 
     private fun handleIncomingCall(ip: String) {
-        // FSI-уведомление — работает даже когда приложение в фоне
+        // Рингтон и таймаут — теперь ТОЛЬКО в IncomingCallActivity.
+        // Здесь только: показать нотификацию и попытаться поднять Activity.
         NotificationHelper.showIncomingCallNotification(this, ip)
-        // Прямой запуск Activity (если приложение в foreground — мгновенно;
-        // если в background — система поднимет через FSI или user тапнет notification)
         try {
             startActivity(Intent(this, IncomingCallActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
                 putExtra(IncomingCallActivity.EXTRA_IP, ip)
             })
-        } catch (_: Exception) { }
-        // Рингтон с таймаутом 60 сек
-        playRingtone()
-        isRinging = true
-        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-            if (isRinging) {
-                InAppLogger.write('I', "Main", "ringtone timeout → decline $ip")
-                stopRingtone()
-                NotificationHelper.cancelIncomingCall(this)
-                meshNode.declineCall(ip)
-                isRinging = false
-            }
-        }, 60_000L)
+        } catch (e: Exception) {
+            InAppLogger.write('E', "Main", "startIncomingCallActivity failed", e)
+        }
     }
 
-    private fun dismissRinging() {
-        if (!isRinging) return
-        isRinging = false
-        stopRingtone()
-        NotificationHelper.cancelIncomingCall(this)
-    }
 
 
     private fun requestCallPermissions() {
@@ -566,6 +533,31 @@ class MainActivity : AppCompatActivity() {
                 Toast.makeText(this@MainActivity, "Не удалось запустить установку", Toast.LENGTH_LONG).show()
             }
         }
+    }
+
+
+    private fun forceFsiPermission() {
+        if (Build.VERSION.SDK_INT < 34) {
+            Toast.makeText(this, "На Android < 14 FSI включён по умолчанию", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val nm = getSystemService(NotificationManager::class.java)
+        if (nm.canUseFullScreenIntent()) {
+            Toast.makeText(this, "✅ FSI уже разрешён", Toast.LENGTH_SHORT).show()
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Полноэкранные уведомления")
+            .setMessage("Чтобы входящий звонок открывался на весь экран (даже на заблокированном телефоне), разреши:\n\nНастройки → Приложения → Zvon → Специальные права → Полноэкранные уведомления → Разрешить")
+            .setPositiveButton("Открыть настройки") { _, _ ->
+                try {
+                    startActivity(Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT, Uri.parse("package:$packageName")))
+                } catch (_: Exception) {
+                    try { startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))) } catch (_: Exception) {}
+                }
+            }
+            .setNegativeButton("Позже", null)
+            .show()
     }
 
     private fun manualCheckUpdate() {

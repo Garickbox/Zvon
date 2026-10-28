@@ -49,6 +49,7 @@ class SelfTestRunner(private val context: Context) {
         add(check("Хранилище", ::checkStorage))
         add(check("MeshNode", ::checkMeshNode))
         add(check("NotificationListener", ::checkNotificationListener))
+        add(check("Полноэкранные уведомления (FSI)", ::checkFullScreenIntent))
         return results
     }
 
@@ -272,6 +273,21 @@ class SelfTestRunner(private val context: Context) {
             }
             null
         } catch (_: Exception) { null }
+    }
+
+
+
+    private fun checkFullScreenIntent(): Pair<Boolean, String> {
+        if (Build.VERSION.SDK_INT < 34) {
+            return true to "Android < 14 — не требуется"
+        }
+        return try {
+            val nm = context.getSystemService(android.app.NotificationManager::class.java)
+            if (nm.canUseFullScreenIntent()) true to "разрешено"
+            else false to "ЗАПРЕЩЕНО — Настройки → Уведомления → Zvon → Полноэкранные"
+        } catch (e: Exception) {
+            false to "ошибка: ${e.message}"
+        }
     }
 
 
