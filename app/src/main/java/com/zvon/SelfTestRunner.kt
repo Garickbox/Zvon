@@ -50,6 +50,7 @@ class SelfTestRunner(private val context: Context) {
         add(check("MeshNode", ::checkMeshNode))
         add(check("NotificationListener", ::checkNotificationListener))
         add(check("Полноэкранные уведомления (FSI)", ::checkFullScreenIntent))
+        add(check("MeshNode жизнь (Stage 6)", ::checkAppLifecycle))
         return results
     }
 
@@ -288,6 +289,18 @@ class SelfTestRunner(private val context: Context) {
         } catch (e: Exception) {
             false to "ошибка: ${e.message}"
         }
+    }
+
+
+
+    private fun checkAppLifecycle(): Pair<Boolean, String> {
+        val m = ZvonController.meshNode
+        if (m == null) return false to "meshNode null (Service убит?)"
+        val pip = ZvonController.pipeline
+        val inGroup = m.isInGroup()
+        val mode = m.currentMode()
+        val pipelineInfo = if (pip != null) "pipeline=alive" else "pipeline=null"
+        return true to "meshNode=alive mode=$mode inGroup=$inGroup $pipelineInfo"
     }
 
 

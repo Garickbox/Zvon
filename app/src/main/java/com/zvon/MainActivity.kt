@@ -119,8 +119,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupMesh() {
-        meshNode = MeshNode(this)
-        ZvonController.meshNode = meshNode
+        val existing = ZvonController.meshNode
+        if (existing != null) {
+            InAppLogger.write('I', "Main", "reusing existing meshNode (Service alive)")
+            meshNode = existing
+        } else {
+            InAppLogger.write('I', "Main", "creating new meshNode")
+            meshNode = MeshNode(this)
+            ZvonController.meshNode = meshNode
+        }
         meshNode.onPeersChanged = { peers -> runOnUiThread { if (!showingChats) renderPeers(peers) } }
         meshNode.onGroupFormed = { myIp, peerIp, isGo -> runOnUiThread { onGroupReady(myIp, peerIp, isGo) } }
         meshNode.onGroupLost = { runOnUiThread { statusText.text = "Группа потеряна"; if (showingChats) renderChats() } }
@@ -348,7 +355,6 @@ class MainActivity : AppCompatActivity() {
         stopDurationTimer(); exitCallAudioMode()
         callView.visibility = View.GONE; discoveryView.visibility = View.VISIBLE
         val p = pipeline; pipeline = null
-        MeshForegroundService.stop(this)
         if (p != null) lifecycleScope.launch { p.stop() }
         statusText.text = "Звонок завершён ($reason)"
     }
@@ -658,19 +664,20 @@ class MainActivity : AppCompatActivity() {
 
     override fun onPause() { super.onPause(); InAppLogger.flush() }
     override fun onDestroy() {
-        InAppLogger.write('I', "UI", "onDestroy"); InAppLogger.flush()
+        InAppLogger.write('I', "UI", "onDestroy (meshNode survives)")
+        InAppLogger.flush()
         try { currentFileDialog?.dismiss() } catch (_: Exception) { }
         currentFileDialog = null
         ZvonController.onFileOfferChanged = null
         ZvonController.onPeerTestInviteChanged = null
         try { currentPeerTestDialog?.dismiss() } catch (_: Exception) { }
         currentPeerTestDialog = null
-        // NB: pending deferred НЕ отменяем — meshNode.close() ниже отменит
-        // MeshNode-scope и awaitFileDecision уйдёт в finally. Если Activity
-        // пересоздаётся — новый onCreate подхватит pending через replay.
+        // FGS + MeshNode живут отдельно от Activity:
+        // — НЕ закрываем meshNode
+        // — НЕ стопим pipeline
+        // — НЕ останавливаем Service
+        // Явно закрыть всё — кнопка «Завершить работу» в главном меню
         super.onDestroy()
-        pipeline?.let { p -> lifecycleScope.launch { p.stop() } }
-        MeshForegroundService.stop(this); meshNode.close()
     }
     private fun playRingtone() { /* рингтон играет только IncomingCallActivity */ }
 
@@ -687,6 +694,32 @@ class MainActivity : AppCompatActivity() {
         p.start(peerIp)
         pipeline = p
         ZvonController.pipeline = p
+    }
+
+
+    private fun shutdownApp() {
+        AlertDialog.Builder(this)
+            .setTitle("Завершить Zvon?")
+            .setMessage("Звонок (если идёт) будет завершён. Соединение разорвано. Приложение полностью закроется.")
+            .setPositiveButton("Завершить") { _, _ ->
+                InAppLogger.write('I', "Main", "shutdownApp requested")
+                try {
+                    ZvonController.pipeline?.let { p ->
+                        // Запускаем stop в новом scope — не блокируемся на finish()
+                        kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                            try { p.stop() } catch (_: Exception) {}
+                        }
+                    }
+                } catch (_: Exception) {}
+                ZvonController.pipeline = null
+                try { meshNode.close() } catch (_: Exception) {}
+                ZvonController.meshNode = null
+                MeshForegroundService.stop(this)
+                finishAffinity()
+                android.os.Process.killProcess(android.os.Process.myPid())
+            }
+            .setNegativeButton("Отмена", null)
+            .show()
     }
 
 
