@@ -468,6 +468,39 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
+
+    private fun showNotifAccessDialog() {
+        val enabled = isNotificationListenerEnabled()
+        val msg = if (enabled) "✅ Уже включён.\n\nПолучено уведомлений: ${ZvonNotificationListener.receivedCount}"
+                  else "Чтобы видеть все Zvon-уведомления в логе и отвечать на них прямо из шторки, разрешите доступ.\n\nНастройки → Уведомления → Доступ к уведомлениям → Zvon"
+        AlertDialog.Builder(this)
+            .setTitle("Доступ к уведомлениям")
+            .setMessage(msg)
+            .setPositiveButton(if (enabled) "Тест" else "Открыть настройки") { _, _ ->
+                if (enabled) sendTestNotification()
+                else {
+                    try { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }
+                    catch (_: Exception) {
+                        Toast.makeText(this, "Настройки → Уведомления → Доступ", Toast.LENGTH_LONG).show()
+                    }
+                }
+            }
+            .setNegativeButton("Закрыть", null)
+            .show()
+    }
+
+    private fun isNotificationListenerEnabled(): Boolean {
+        return try {
+            val flat = Settings.Secure.getString(contentResolver, "enabled_notification_listeners")
+            flat?.contains(packageName) == true
+        } catch (_: Exception) { false }
+    }
+
+    private fun sendTestNotification() {
+        NotificationHelper.showMessage(this, "test-peer", "Test message ${System.currentTimeMillis() % 10000}", "")
+        Toast.makeText(this, "Через 1 сек проверь лог: NotifListener posted", Toast.LENGTH_LONG).show()
+    }
+
     private fun requestBatteryExemption() {
         val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
         if (pm.isIgnoringBatteryOptimizations(packageName)) return
