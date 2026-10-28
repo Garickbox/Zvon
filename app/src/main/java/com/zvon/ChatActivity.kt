@@ -49,7 +49,7 @@ class ChatActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         mesh = currentNode ?: run { finish(); return }
         peerId = intent.getStringExtra(EXTRA_PEER_ID) ?: run { finish(); return }
-        peerIp = intent.getStringExtra(EXTRA_PEER_IP) ?: run { finish(); return }
+        peerIp = intent.getStringExtra(EXTRA_PEER_IP) ?: ""
         peerName = intent.getStringExtra(EXTRA_PEER_NAME) ?: peerId.take(8)
 
         setContentView(buildUi())
@@ -115,6 +115,10 @@ class ChatActivity : AppCompatActivity() {
     private fun send() {
         val txt = input.text.toString().trim()
         if (txt.isEmpty()) return
+        if (peerIp.isBlank()) {
+            Toast.makeText(this, "Нет соединения с пиром", Toast.LENGTH_SHORT).show()
+            return
+        }
         mesh.sendText(peerId, peerIp, txt)
         input.setText("")
         reload()

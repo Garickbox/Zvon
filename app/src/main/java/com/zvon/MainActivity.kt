@@ -3,6 +3,7 @@ package com.zvon
 import android.Manifest
 import android.annotation.SuppressLint
 import android.app.AlertDialog
+import android.app.NotificationManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -41,8 +42,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var peerList: LinearLayout
     private lateinit var btnDiscover: Button
     private lateinit var btnForceReset: Button
-    private lateinit var btnRaw: Button
-    private lateinit var btnLoopback: Button
     private lateinit var btnShareLog: Button
     private lateinit var btnChats: Button
     private lateinit var discoveryView: View
@@ -54,7 +53,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnMute: Button
     private lateinit var btnSpeaker: Button
 
-    private var isStopping = false
     @Volatile private var currentPeerIp: String? = null
     @Volatile private var currentPeerId: String? = null
     private var callStartMs = 0L
@@ -71,8 +69,6 @@ class MainActivity : AppCompatActivity() {
         peerList = findViewById(R.id.peerList)
         btnDiscover = findViewById(R.id.btnDiscover)
         btnForceReset = findViewById(R.id.btnForceReset)
-        btnRaw = findViewById(R.id.btnRaw)
-        btnLoopback = findViewById(R.id.btnLoopback)
         btnShareLog = findViewById(R.id.btnShareLog)
         btnChats = findViewById(R.id.btnChats)
         discoveryView = findViewById(R.id.discoveryView)
@@ -91,6 +87,7 @@ class MainActivity : AppCompatActivity() {
         btnChats.setOnClickListener { toggleChatsView() }
 
         requestPerms()
+        requestFullScreenIntentPermission()
         requestBatteryExemption()
         maybeShowMiuiHint()
         setupMesh()
@@ -188,22 +185,8 @@ class MainActivity : AppCompatActivity() {
     private fun wireUi() {
         btnForceReset.setOnClickListener { showingChats = false; statusText.text = "Сброс…"; peerList.removeAllViews(); meshNode.forceReset() }
         btnDiscover.setOnClickListener { showingChats = false; peerList.removeAllViews(); statusText.text = "Поиск..."; meshNode.discover() }
-        btnRaw.setOnClickListener { toggleLoopback(PipelineMode.RAW_CODEC) }
-        btnLoopback.setOnClickListener { toggleLoopback(PipelineMode.FULL_LOOPBACK) }
     }
 
-    private fun toggleLoopback(mode: PipelineMode) {
-        if (isStopping) return
-        val p = pipeline
-        if (p == null) {
-            pipeline = AudioPipeline(mode); pipeline?.start()
-            statusText.text = "Работает: $mode"
-            btnRaw.isEnabled = false; btnLoopback.isEnabled = false
-        } else {
-            isStopping = true; btnRaw.isEnabled = false; btnLoopback.isEnabled = false
-            lifecycleScope.launch { p.stop(); pipeline = null; statusText.text = "Остановлено"; btnRaw.isEnabled = true; btnLoopback.isEnabled = true; isStopping = false }
-        }
-    }
 
     private fun renderPeers(peers: List<MeshNode.WifiP2pDeviceInfo>) {
         peerList.removeAllViews()
@@ -376,6 +359,23 @@ class MainActivity : AppCompatActivity() {
         val perms = mutableListOf(Manifest.permission.RECORD_AUDIO, Manifest.permission.ACCESS_FINE_LOCATION)
         if (Build.VERSION.SDK_INT >= 33) { perms += Manifest.permission.NEARBY_WIFI_DEVICES; perms += Manifest.permission.POST_NOTIFICATIONS }
         ActivityCompat.requestPermissions(this, perms.toTypedArray(), 1)
+    }
+
+
+    private fun requestFullScreenIntentPermission() {
+        if (Build.VERSION.SDK_INT >= 34) {
+            val nm = getSystemService(NotificationManager::class.java)
+            if (!nm.canUseFullScreenIntent()) {
+                AlertDialog.Builder(this)
+                    .setTitle("Звонок на заблокированном экране")
+                    .setMessage("Разрешите полноэкранные уведомления, чтобы видеть входящий звонок.")
+                    .setPositiveButton("Открыть") { _, _ ->
+                        try { startActivity(Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT, Uri.parse("package:$packageName"))) } catch (_: Exception) {}
+                    }
+                    .setNegativeButton("Позже", null)
+                    .show()
+            }
+        }
     }
 
     override fun onPause() { super.onPause(); InAppLogger.flush() }

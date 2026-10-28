@@ -19,11 +19,13 @@ object NotificationHelper {
         }
     }
 
-    fun showMessage(context: Context, fromId: String, text: String) {
+    fun showMessage(context: Context, fromId: String, text: String, peerIp: String) {
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        val intent = Intent(context, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            putExtra("open_chat", fromId)
+        val intent = Intent(context, ChatActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra(ChatActivity.EXTRA_PEER_ID, fromId)
+            putExtra(ChatActivity.EXTRA_PEER_IP, peerIp)
+            putExtra(ChatActivity.EXTRA_PEER_NAME, fromId.take(8))
         }
         val pi = PendingIntent.getActivity(context, fromId.hashCode(), intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
 

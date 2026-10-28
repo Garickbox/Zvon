@@ -60,6 +60,8 @@ class MeshNode(
     data class WifiP2pDeviceInfo(val name: String, val address: String, val raw: WifiP2pDevice)
 
     fun start() {
+        wifi.autoReconnectEnabled = true
+        wifi.onStateChanged = { st -> logger.d("[Mesh] p2p $st") }
         wifi.onPeersChanged = { peers ->
             onPeersChanged?.invoke(peers.map { WifiP2pDeviceInfo(it.deviceName ?: it.deviceAddress, it.deviceAddress, it) })
         }
